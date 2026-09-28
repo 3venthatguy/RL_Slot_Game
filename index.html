@@ -1,0 +1,1185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A rule-discovery game: audit a casino floor and find the one machine rigged in the customer's favor.">
+<title>The House Rule</title>
+<style>
+  /* ---------- Design tokens: every color in this file comes from here ---------- */
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f0e8;
+    --surface: #fffdf8;
+    --text: #1d2230;
+    --muted: #5a6172;
+    --ink: #1d2230;
+    --line: #2b3244;
+    --floor: #e4dfd2;
+    --floor-dot: #cbc4b3;
+    --screen: #ece8dc;
+    --pit-0: #fbf9f3;
+    --pit-1: #efebe1;
+    --pit-2: #f6f3eb;
+    --pit-3: #e9e5d9;
+    --pit-4: #f2eee5;
+    --btn-bg: #1d2230;
+    --btn-text: #fffdf8;
+    --btn2-bg: #fffdf8;
+    --btn2-text: #1d2230;
+    --btn2-border: #9a9fab;
+    --focus: #1f5fd6;
+    --win: #17693a;
+    --loss: #b3261e;
+    --found: #1f5fd6;
+    --debug: #b3261e;
+    --code-bg: #1d2230;
+    --code-text: #fffdf8;
+    /* The 6-color machine palette (names are fixed; see COLORS in the logic block) */
+    --c-ruby: #c62a47;
+    --c-amber: #e09a00;
+    --c-teal: #0f9a94;
+    --c-violet: #7b4fd6;
+    --c-emerald: #2e9e4f;
+    --c-sapphire: #2463d1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1420;
+      --surface: #171e2d;
+      --text: #e8ebf2;
+      --muted: #a0a8ba;
+      --ink: #c9d2e3;
+      --line: #aeb9cf;
+      --floor: #0a0e17;
+      --floor-dot: #242d40;
+      --screen: #0d121c;
+      --pit-0: #182031;
+      --pit-1: #253047;
+      --pit-2: #1e2739;
+      --pit-3: #2c3851;
+      --pit-4: #1c2436;
+      --btn-bg: #e8ebf2;
+      --btn-text: #0f1420;
+      --btn2-bg: #171e2d;
+      --btn2-text: #e8ebf2;
+      --btn2-border: #5c667c;
+      --focus: #7fb0ff;
+      --win: #5fd98a;
+      --loss: #ff7a70;
+      --found: #7fb0ff;
+      --debug: #ff7a70;
+      --code-bg: #e8ebf2;
+      --code-text: #0f1420;
+      --c-ruby: #ff5c7a;
+      --c-amber: #ffc02e;
+      --c-teal: #2fd4c8;
+      --c-violet: #a988ff;
+      --c-emerald: #4fd27a;
+      --c-sapphire: #5b93ff;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding: max(12px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+             max(16px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+  h1, h2, h3 { line-height: 1.2; margin: 0 0 0.5rem; }
+  h1 { font-size: 2.1rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.5rem; }
+  h3 { font-size: 1rem; }
+  h1:focus, h2:focus { outline: none; }
+  p { margin: 0 0 0.75rem; }
+  .eyebrow {
+    font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 0.4rem;
+  }
+  .lede { color: var(--muted); }
+  .pad { padding: 0 8px; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    appearance: none; font: inherit; font-weight: 600; cursor: pointer;
+    min-height: 44px; min-width: 44px; padding: 0.55rem 1rem;
+    border-radius: 8px; border: 2px solid var(--btn-bg);
+    background: var(--btn-bg); color: var(--btn-text);
+    touch-action: manipulation;
+  }
+  .btn.secondary { background: var(--btn2-bg); color: var(--btn2-text); border-color: var(--btn2-border); }
+  .btn:focus-visible, .cell:focus-visible {
+    outline: 3px solid var(--focus); outline-offset: 2px;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0.75rem 0; }
+
+  /* ---------- Intro ---------- */
+  #screen-intro { padding-top: 12vh; text-align: center; }
+  #screen-intro .pad p { max-width: 34em; margin-inline: auto; }
+  #screen-intro .actions { justify-content: center; }
+
+  /* ---------- Stats bar ---------- */
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline;
+    background: var(--surface); border: 1px solid var(--btn2-border);
+    border-radius: 8px; padding: 0.5rem 0.75rem; margin-top: 0.5rem;
+  }
+  .stat-label { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-right: 0.4rem; }
+  .stat-value { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .msg { min-height: 1.5em; font-weight: 600; margin: 0.25rem 0 0.75rem; }
+  .msg.bad { color: var(--loss); }
+  .msg .nudge { display: block; font-weight: 400; color: var(--muted); margin-top: 0.25rem; }
+
+  /* ---------- Board ---------- */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 12), 1fr); /* set from CONFIG.COLS in renderGrid */
+    width: 100%;
+    background-color: var(--floor);
+    /* Dotted "carpet" so aisles read as walkable floor, not missing data */
+    background-image: radial-gradient(var(--floor-dot) 1.2px, transparent 1.6px);
+    background-size: 11px 11px;
+    border-radius: 6px;
+  }
+  .cell {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    min-width: 0;
+    margin: 0; padding: 0;
+    font: inherit; color: inherit;
+    appearance: none; border-radius: 0;
+    /* All four sides always reserve 2px so every cell is the same size;
+       the wall sides are made visible below (see borderSides in the logic block). */
+    border: 2px solid transparent;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cell.machine { cursor: pointer; touch-action: manipulation; }
+  .cell.machine:disabled { cursor: default; }
+  div.cell.machine { cursor: default; }
+  .cell.bt { border-top-color: var(--line); }
+  .cell.br { border-right-color: var(--line); }
+  .cell.bb { border-bottom-color: var(--line); }
+  .cell.bl { border-left-color: var(--line); }
+  .tint-0 { background: var(--pit-0); }
+  .tint-1 { background: var(--pit-1); }
+  .tint-2 { background: var(--pit-2); }
+  .tint-3 { background: var(--pit-3); }
+  .tint-4 { background: var(--pit-4); }
+
+  .icon { width: 86%; height: 86%; display: block; pointer-events: none; }
+  .m-body { fill: var(--surface); stroke: var(--ink); stroke-width: 1.4; }
+  .m-screen { fill: var(--screen); stroke: var(--ink); stroke-width: 0.9; }
+  .m-lever, .m-tray { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  .m-knob { fill: var(--ink); }
+  .lamp { stroke: var(--ink); stroke-width: 0.8; stroke-linejoin: round; }
+  .c-0 { fill: var(--c-ruby); }
+  .c-1 { fill: var(--c-amber); }
+  .c-2 { fill: var(--c-teal); }
+  .c-3 { fill: var(--c-violet); }
+  .c-4 { fill: var(--c-emerald); }
+  .c-5 { fill: var(--c-sapphire); }
+
+  .cell.is-wrong .icon { opacity: 0.35; }
+  .wrong-mark {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--loss); font-size: 1.1rem; font-weight: 700; pointer-events: none;
+  }
+  .cell.is-found { box-shadow: 0 0 0 3px var(--found), inset 0 0 0 3px var(--found); z-index: 1; }
+  .cell.is-debug-true { outline: 3px dashed var(--debug); outline-offset: -6px; }
+
+  /* Spin result popup */
+  .pop {
+    position: absolute; left: 50%; top: 50%; z-index: 3;
+    transform: translate(-50%, -50%);
+    padding: 0.1rem 0.45rem; border-radius: 999px; border: 2px solid currentColor;
+    background: var(--surface); font-weight: 800; font-size: 0.95rem; white-space: nowrap;
+    pointer-events: none;
+    animation: pop-rise 1.1s ease-out forwards;
+  }
+  .pop.win { color: var(--win); }
+  .pop.loss { color: var(--loss); }
+  .pop.even { color: var(--muted); }
+  @keyframes pop-rise {
+    0% { opacity: 0; transform: translate(-50%, -30%); }
+    15% { opacity: 1; transform: translate(-50%, -60%); }
+    75% { opacity: 1; transform: translate(-50%, -110%); }
+    100% { opacity: 0; transform: translate(-50%, -140%); }
+  }
+
+  /* ---------- Legend ---------- */
+  .legend {
+    list-style: none; padding: 0; margin: 0.75rem 0 0;
+    display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.875rem; color: var(--muted);
+  }
+  .legend li { display: flex; align-items: center; gap: 4px; }
+  .legend svg { width: 18px; height: 18px; }
+
+  /* ---------- Success ---------- */
+  .code {
+    display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 2rem; font-weight: 700; letter-spacing: 0.25em;
+    background: var(--code-bg); color: var(--code-text);
+    padding: 0.35rem 0.5rem 0.35rem 0.75rem; border-radius: 8px; margin: 0.25rem 0 1rem;
+  }
+  .fine { font-size: 0.875rem; color: var(--muted); margin-top: 1rem; }
+
+  /* ---------- Debug (only with ?debug=1) ---------- */
+  .debug {
+    margin-top: 1rem; padding: 0.75rem; border: 2px dashed var(--debug); border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem;
+  }
+  .debug h3 { color: var(--debug); }
+  .debug dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+  .debug dt { color: var(--muted); }
+  .debug dd { margin: 0; }
+
+  @media (min-width: 480px) {
+    body { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+    .pad { padding: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pop { animation: none; }
+  }
+</style>
+</head>
+<body>
+<noscript><p>This game needs JavaScript.</p></noscript>
+<main>
+  <!-- Intro -->
+  <section id="screen-intro" aria-labelledby="intro-title" hidden>
+    <div class="pad">
+      <p class="eyebrow">Gaming Commission &middot; Field Audit</p>
+      <h1 id="intro-title" tabindex="-1">The House Rule</h1>
+      <p>You're auditors. This casino chain swears its floors pay customers back on average, and on paper the math checks out.</p>
+      <p>Most machines quietly favor the house. A few lean your way. One is rigged heavily in the customer's favor, and nothing on it says so.</p>
+      <p>Every floor in the chain is laid out by the same two house rules. The layout tells the story. Spinning helps a little, but you only get a handful of spins per casino.</p>
+      <p>Learn to read the floor, then prove it on a floor you've never seen.</p>
+      <div class="actions"><button type="button" class="btn" id="btn-enter">Enter the Casino</button></div>
+    </div>
+  </section>
+
+  <!-- Practice + Final Audit share one screen -->
+  <section id="screen-floor" aria-labelledby="floor-title" hidden>
+    <div class="pad">
+      <p class="eyebrow" id="floor-eyebrow"></p>
+      <h2 id="floor-title" tabindex="-1"></h2>
+      <p class="lede" id="floor-lede"></p>
+      <div class="bar" id="stats">
+        <div><span class="stat-label">Spins</span><span class="stat-value" id="stat-spins"></span></div>
+        <div><span class="stat-label">Net</span><span class="stat-value" id="stat-net"></span></div>
+      </div>
+      <div class="actions" id="practice-actions">
+        <button type="button" class="btn secondary" id="btn-new">New Casino</button>
+        <button type="button" class="btn" id="btn-audit">I'm ready for the Audit</button>
+      </div>
+      <p class="msg" id="floor-msg"></p>
+    </div>
+    <div class="board" id="floor-grid" role="group" aria-label="Casino floor"></div>
+    <div class="pad">
+      <ul class="legend" id="legend" aria-label="Machine colors"></ul>
+      <div class="actions" id="audit-actions">
+        <button type="button" class="btn secondary" id="btn-back">Back to Practice</button>
+      </div>
+    </div>
+    <aside class="debug pad" id="debug" hidden></aside>
+  </section>
+
+  <!-- Success -->
+  <section id="screen-success" aria-labelledby="success-title" hidden>
+    <div class="pad">
+      <p class="eyebrow">Final Audit</p>
+      <h2 id="success-title" tabindex="-1">Audit Passed</h2>
+      <p>Report this code to your facilitator:</p>
+      <p class="code" id="audit-code"></p>
+    </div>
+    <div class="board" id="success-grid" role="group" aria-label="The audited floor"></div>
+    <div class="pad">
+      <h3 style="margin-top:1rem">Why this machine</h3>
+      <p id="success-why"></p>
+      <div class="actions"><button type="button" class="btn" id="btn-again">Play Again</button></div>
+      <p class="fine">Nothing here was recorded or sent anywhere.</p>
+    </div>
+  </section>
+
+  <div class="sr-only" id="live" aria-live="polite"></div>
+</main>
+
+<script>
+/* LOGIC:BEGIN
+ * Pure generation / game logic. No DOM access in this block.
+ * tests/logic.test.mjs extracts exactly the text between these markers from this
+ * file and runs it in Node, so this block is the single source of truth.
+ */
+const HouseLogic = (() => {
+  'use strict';
+
+  // ---- Tunable constants (see README "Tuning") ----
+  const CONFIG = Object.freeze({
+    ROWS: 12,
+    COLS: 12,
+    MACHINE_COUNT: 50,
+    AISLE_COUNT: 94,                // must equal ROWS * COLS - MACHINE_COUNT
+    PIT_COUNT_MIN: 8,               // K range, inclusive
+    PIT_COUNT_MAX: 14,
+    TRUE_PIT_SIZE: 4,               // the position rule
+    TRUE_PIT_COUNT_MIN: 2,          // m range: how many pits have exactly TRUE_PIT_SIZE machines
+    TRUE_PIT_COUNT_MAX: 4,
+    OTHER_PIT_SIZES: Object.freeze([3, 5, 6, 7]), // pits are 3-7 machines; must not contain TRUE_PIT_SIZE
+    PLACEMENT_ATTEMPTS: 400,        // whole-layout retries while chasing fully contiguous pits
+    MAJOR_WEIGHT: 3,                // majority color's draw weight vs 1 for each other color
+    MIN_MARGIN: 4,                  // majority count minus runner-up count, at least
+    MAJOR_SOFT_CAP: 18,             // keep the majority from swamping the floor
+    REPAIR_ATTEMPTS: 200,
+    MAX_GENERATION_ATTEMPTS: 25,
+    FAVORABLE_COUNT: 14,            // house machines = MACHINE_COUNT - 1 - FAVORABLE_COUNT = 35
+    // Payout tables: [dollars, weight]
+    HOUSE_OUTCOMES: Object.freeze([[-2, 1], [-1, 1], [0, 1], [1, 1]].map(Object.freeze)),     // EV -0.50
+    FAVORABLE_OUTCOMES: Object.freeze([[-1, 3], [0, 3], [1, 2], [2, 2]].map(Object.freeze)),  // EV +0.30
+    JACKPOT_CHANCE: 0.1,            // true machine only
+    JACKPOT_MIN: 15,
+    JACKPOT_MAX: 25,
+    SPIN_BUDGET: 15,                // spins per practice casino
+    AUDIT_CODE: 'BANDIT',           // shown on every passed audit
+  });
+
+  const COLORS = Object.freeze(['Ruby', 'Amber', 'Teal', 'Violet', 'Emerald', 'Sapphire']);
+  const TIER = Object.freeze({ HOUSE: 0, FAVORABLE: 1, TRUE: 2 });
+  const TOTAL = CONFIG.ROWS * CONFIG.COLS;
+
+  class GenerationError extends Error {
+    constructor(msg) { super(msg); this.name = 'GenerationError'; }
+  }
+
+  // ---- RNG helpers (rng is any () => [0, 1) function) ----
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const randInt = (rng, lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+  const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
+  function shuffle(rng, arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  function weightedPick(rng, weights) {
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = rng() * total;
+    for (let i = 0; i < weights.length; i++) {
+      r -= weights[i];
+      if (r < 0) return i;
+    }
+    return weights.length - 1;
+  }
+
+  // Orthogonal neighbours as [up, right, down, left]; -1 where off the grid.
+  function neighbors(i) {
+    const r = Math.floor(i / CONFIG.COLS), c = i % CONFIG.COLS;
+    return [
+      r > 0 ? i - CONFIG.COLS : -1,
+      c < CONFIG.COLS - 1 ? i + 1 : -1,
+      r < CONFIG.ROWS - 1 ? i + CONFIG.COLS : -1,
+      c > 0 ? i - 1 : -1,
+    ];
+  }
+
+  // ---- Step 1-2: pit count and sizes ----
+  // reach[j] = every total reachable with exactly j pits drawn from OTHER_PIT_SIZES.
+  // Sampling each size only from values that keep the remainder reachable means the
+  // sizes always land on exactly MACHINE_COUNT, with no open-ended retry loop.
+  const reach = (() => {
+    const maxN = CONFIG.PIT_COUNT_MAX - CONFIG.TRUE_PIT_COUNT_MIN;
+    const out = [new Set([0])];
+    for (let j = 1; j <= maxN; j++) {
+      const s = new Set();
+      for (const t of out[j - 1]) for (const o of CONFIG.OTHER_PIT_SIZES) s.add(t + o);
+      out.push(s);
+    }
+    return out;
+  })();
+
+  function choosePitSizes(rng) {
+    for (let tries = 0; tries < 1000; tries++) {
+      const k = randInt(rng, CONFIG.PIT_COUNT_MIN, CONFIG.PIT_COUNT_MAX);
+      const m = randInt(rng, CONFIG.TRUE_PIT_COUNT_MIN, CONFIG.TRUE_PIT_COUNT_MAX);
+      const n = k - m;
+      const rest = CONFIG.MACHINE_COUNT - m * CONFIG.TRUE_PIT_SIZE;
+      // Some (K, m) pairs can't sum to 50 (e.g. K=8, m=4 needs four pits averaging 8.5); redraw.
+      if (n < 0 || !reach[n] || !reach[n].has(rest)) continue;
+      const sizes = [];
+      let remaining = rest;
+      for (let j = n; j > 0; j--) {
+        const options = CONFIG.OTHER_PIT_SIZES.filter((s) => reach[j - 1].has(remaining - s));
+        const s = pick(rng, options);
+        sizes.push(s);
+        remaining -= s;
+      }
+      for (let i = 0; i < m; i++) sizes.push(CONFIG.TRUE_PIT_SIZE);
+      return shuffle(rng, sizes);
+    }
+    throw new GenerationError('No feasible pit-size combination for the configured ranges');
+  }
+
+  // ---- Step 3-4: region growth ----
+  function nearestFree(cells, members, rng) {
+    let best = [], bestD = Infinity;
+    for (let i = 0; i < TOTAL; i++) {
+      if (cells[i] >= 0) continue;
+      let d = Infinity;
+      for (const m of members) {
+        const dd = Math.abs(Math.floor(i / CONFIG.COLS) - Math.floor(m / CONFIG.COLS)) +
+                   Math.abs((i % CONFIG.COLS) - (m % CONFIG.COLS));
+        if (dd < d) d = dd;
+      }
+      if (d < bestD) { bestD = d; best = [i]; } else if (d === bestD) best.push(i);
+    }
+    return pick(rng, best);
+  }
+
+  function tryPlacePits(sizes, rng) {
+    const cells = new Array(TOTAL).fill(-1);
+    let contiguous = true;
+    const order = shuffle(rng, sizes.map((_, i) => i));
+    for (const pit of order) {
+      const free = [];
+      for (let i = 0; i < TOTAL; i++) if (cells[i] < 0) free.push(i);
+      const members = [pick(rng, free)];
+      cells[members[0]] = pit;
+      while (members.length < sizes[pit]) {
+        const frontier = [];
+        for (const c of members) {
+          for (const nb of neighbors(c)) {
+            if (nb >= 0 && cells[nb] < 0 && !frontier.includes(nb)) frontier.push(nb);
+          }
+        }
+        let next;
+        if (frontier.length) {
+          next = pick(rng, frontier);
+        } else {
+          // Boxed in: spec's best-effort fallback. Marks this layout non-contiguous.
+          contiguous = false;
+          next = nearestFree(cells, members, rng);
+        }
+        cells[next] = pit;
+        members.push(next);
+      }
+    }
+    return { cells, contiguous };
+  }
+
+  // Pits sum to MACHINE_COUNT, so exactly AISLE_COUNT cells are always left unclaimed,
+  // with or without fallback claims; no need to pre-reserve aisles.
+  // A split pit would render as two outlines and mislead players, so we retry the whole
+  // layout (bounded) until every pit is contiguous, keeping the last try as best effort.
+  function placePits(sizes, rng) {
+    let result;
+    for (let a = 0; a < CONFIG.PLACEMENT_ATTEMPTS; a++) {
+      result = tryPlacePits(sizes, rng);
+      if (result.contiguous) return result;
+    }
+    return result;
+  }
+
+  // ---- Colors ----
+  function countColors(colors) {
+    const counts = new Array(COLORS.length).fill(0);
+    for (const c of colors) if (c >= 0) counts[c]++;
+    return counts;
+  }
+  function majorityInfo(counts) {
+    let color = 0;
+    for (let c = 1; c < counts.length; c++) if (counts[c] > counts[color]) color = c;
+    let runnerUp = -1;
+    for (let c = 0; c < counts.length; c++) {
+      if (c !== color && (runnerUp < 0 || counts[c] > counts[runnerUp])) runnerUp = c;
+    }
+    return { color, count: counts[color], runnerUp, runnerUpCount: counts[runnerUp], margin: counts[color] - counts[runnerUp] };
+  }
+  function rarestColor(counts, exclude) {
+    let best = -1;
+    for (let c = 0; c < counts.length; c++) {
+      if (exclude.includes(c)) continue;
+      if (best < 0 || counts[c] < counts[best]) best = c;
+    }
+    return best;
+  }
+
+  /*
+   * Construct-then-repair (§3.4). Uniqueness is guaranteed by construction, not by luck:
+   *   - the true machine is the ONLY size-4-pit member given the majority color;
+   *   - every other size-4-pit member is drawn from the 5 non-major colors;
+   *   - "free" machines (not in any size-4 pit) are weighted 3:1 toward the majority color,
+   *     so it usually wins on its own, and the repair loop only ever recolors free machines,
+   *     so it can never create a second size-4 + majority candidate.
+   * The repair then enforces the margin (so "most common" is unambiguous at a glance)
+   * and a soft ceiling (so it isn't trivially "nearly everything").
+   */
+  function assignColors(cells, pitSizes, rng) {
+    const machines = [], s4 = [], free = [];
+    for (let i = 0; i < TOTAL; i++) {
+      if (cells[i] < 0) continue;
+      machines.push(i);
+      (pitSizes[cells[i]] === CONFIG.TRUE_PIT_SIZE ? s4 : free).push(i);
+    }
+    if (!s4.length) throw new GenerationError('No size-4 pits were generated');
+
+    const major = randInt(rng, 0, COLORS.length - 1);
+    const trueCell = pick(rng, s4);
+    const nonMajor = COLORS.map((_, c) => c).filter((c) => c !== major);
+    const colors = new Array(TOTAL).fill(-1);
+
+    colors[trueCell] = major;
+    for (const i of s4) if (i !== trueCell) colors[i] = pick(rng, nonMajor);
+    const weights = COLORS.map((_, c) => (c === major ? CONFIG.MAJOR_WEIGHT : 1));
+    for (const i of free) colors[i] = weightedPick(rng, weights);
+
+    for (let step = 0; ; step++) {
+      const counts = countColors(colors);
+      let runner = -1;
+      for (const c of nonMajor) if (runner < 0 || counts[c] > counts[runner]) runner = c;
+      const over = counts[major] > CONFIG.MAJOR_SOFT_CAP;
+      if (!over && counts[major] - counts[runner] >= CONFIG.MIN_MARGIN) break;
+      if (step >= CONFIG.REPAIR_ATTEMPTS) throw new GenerationError('Color margin repair did not converge');
+
+      let from, to;
+      if (over) {
+        // Too dominant: move a free majority machine to the rarest other color.
+        from = free.filter((i) => colors[i] === major);
+        to = rarestColor(counts, [major]);
+      } else if (counts[major] < CONFIG.MAJOR_SOFT_CAP) {
+        // Margin short: prefer recoloring a runner-up machine (+1 major, -1 runner-up = +2 margin).
+        from = free.filter((i) => colors[i] === runner);
+        if (!from.length) from = free.filter((i) => colors[i] !== major);
+        to = major;
+      } else {
+        // At the ceiling but margin short: shrink the runner-up instead.
+        from = free.filter((i) => colors[i] === runner);
+        to = rarestColor(counts, [major, runner]);
+      }
+      if (!from.length) throw new GenerationError('Color repair ran out of free machines to recolor');
+      colors[pick(rng, from)] = to;
+    }
+    return { colors, majorColor: major, trueCell };
+  }
+
+  // ---- Payout tiers: an independent shuffle, blind to pits and colors ----
+  function assignTiers(cells, trueCell, rng) {
+    const tiers = new Array(TOTAL).fill(-1);
+    const others = [];
+    for (let i = 0; i < TOTAL; i++) if (cells[i] >= 0 && i !== trueCell) others.push(i);
+    shuffle(rng, others).forEach((c, k) => { tiers[c] = k < CONFIG.FAVORABLE_COUNT ? TIER.FAVORABLE : TIER.HOUSE; });
+    tiers[trueCell] = TIER.TRUE;
+    return tiers;
+  }
+
+  // ---- Validation: used both as the post-generation guard and to vet resumed state ----
+  function validateGrid(g) {
+    if (!g || typeof g !== 'object') return ['grid is not an object'];
+    const isIntArr = (a, len) => Array.isArray(a) && (len === undefined || a.length === len) && a.every(Number.isInteger);
+    if (!isIntArr(g.cells, TOTAL)) return ['cells must be ' + TOTAL + ' integers'];
+    if (!isIntArr(g.colors, TOTAL)) return ['colors must be ' + TOTAL + ' integers'];
+    if (!isIntArr(g.tiers, TOTAL)) return ['tiers must be ' + TOTAL + ' integers'];
+    if (!isIntArr(g.pitSizes) || g.pitSizes.length < 1 || g.pitSizes.length > TOTAL) return ['pitSizes invalid'];
+    if (!Number.isInteger(g.majorColor) || g.majorColor < 0 || g.majorColor >= COLORS.length) return ['majorColor invalid'];
+    if (!Number.isInteger(g.trueCell) || g.trueCell < 0 || g.trueCell >= TOTAL) return ['trueCell invalid'];
+
+    const errs = [];
+    const K = g.pitSizes.length;
+    if (K < CONFIG.PIT_COUNT_MIN || K > CONFIG.PIT_COUNT_MAX) errs.push(`pit count ${K} out of range`);
+    const actual = new Array(K).fill(0);
+    let machines = 0, aisles = 0;
+    for (let i = 0; i < TOTAL; i++) {
+      const p = g.cells[i];
+      if (p === -1) {
+        aisles++;
+        if (g.colors[i] !== -1 || g.tiers[i] !== -1) errs.push(`aisle ${i} has color/tier`);
+      } else if (p >= 0 && p < K) {
+        machines++;
+        actual[p]++;
+        if (g.colors[i] < 0 || g.colors[i] >= COLORS.length) errs.push(`machine ${i} color invalid`);
+        if (g.tiers[i] < 0 || g.tiers[i] > 2) errs.push(`machine ${i} tier invalid`);
+      } else {
+        return [`cell ${i} has unknown pit ${p}`];
+      }
+    }
+    if (errs.length) return errs;
+    if (machines !== CONFIG.MACHINE_COUNT) errs.push(`machines ${machines} != ${CONFIG.MACHINE_COUNT}`);
+    if (aisles !== CONFIG.AISLE_COUNT) errs.push(`aisles ${aisles} != ${CONFIG.AISLE_COUNT}`);
+    if (actual.some((n, p) => n !== g.pitSizes[p])) errs.push('pitSizes disagree with cells');
+    const sum = g.pitSizes.reduce((a, b) => a + b, 0);
+    if (sum !== CONFIG.MACHINE_COUNT) errs.push(`pit sizes sum to ${sum}`);
+    const m = g.pitSizes.filter((s) => s === CONFIG.TRUE_PIT_SIZE).length;
+    if (m < CONFIG.TRUE_PIT_COUNT_MIN || m > CONFIG.TRUE_PIT_COUNT_MAX) errs.push(`${m} size-${CONFIG.TRUE_PIT_SIZE} pits`);
+
+    const tierCounts = [0, 0, 0];
+    for (let i = 0; i < TOTAL; i++) if (g.tiers[i] >= 0) tierCounts[g.tiers[i]]++;
+    if (tierCounts[TIER.TRUE] !== 1 || g.tiers[g.trueCell] !== TIER.TRUE) errs.push('true tier misplaced');
+    if (tierCounts[TIER.FAVORABLE] !== CONFIG.FAVORABLE_COUNT) errs.push('favorable count wrong');
+
+    const info = majorityInfo(countColors(g.colors));
+    if (info.margin < CONFIG.MIN_MARGIN) errs.push(`majority margin ${info.margin} < ${CONFIG.MIN_MARGIN}`);
+    if (info.color !== g.majorColor) errs.push('stored majorColor is not the most frequent color');
+    const cands = candidates(g, info.color);
+    if (cands.length !== 1) errs.push(`expected exactly 1 machine matching both rules, found ${cands.length}`);
+    else if (cands[0] !== g.trueCell) errs.push('the machine matching both rules is not trueCell');
+    return errs;
+  }
+
+  function candidates(g, major) {
+    const out = [];
+    for (let i = 0; i < TOTAL; i++) {
+      if (g.cells[i] >= 0 && g.pitSizes[g.cells[i]] === CONFIG.TRUE_PIT_SIZE && g.colors[i] === major) out.push(i);
+    }
+    return out;
+  }
+
+  /*
+   * opts.tamper(grid, attempt) is a test seam: it lets tests corrupt a freshly built grid
+   * to prove the validation guard catches it, logs it, and regenerates instead of shipping it.
+   */
+  function generateGrid(rng = Math.random, opts = {}) {
+    const maxAttempts = opts.maxAttempts || CONFIG.MAX_GENERATION_ATTEMPTS;
+    const log = opts.logger || console;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let grid;
+      try {
+        const pitSizes = choosePitSizes(rng);
+        const { cells, contiguous } = placePits(pitSizes, rng);
+        const { colors, majorColor, trueCell } = assignColors(cells, pitSizes, rng);
+        const tiers = assignTiers(cells, trueCell, rng);
+        grid = { cells, pitSizes, colors, tiers, majorColor, trueCell, contiguous };
+      } catch (e) {
+        if (!(e instanceof GenerationError)) throw e;
+        log.error(`[House Rule] Generation error (attempt ${attempt}): ${e.message}. Regenerating.`);
+        continue;
+      }
+      if (opts.tamper) opts.tamper(grid, attempt);
+      const errors = validateGrid(grid);
+      if (errors.length === 0) return grid;
+      log.error(`[House Rule] Generated grid failed validation (attempt ${attempt}); regenerating. ${errors.join('; ')}`);
+    }
+    throw new GenerationError(`Could not generate a valid grid in ${maxAttempts} attempts`);
+  }
+
+  // ---- Spins and expected value ----
+  const drawOutcome = (table, rng) => table[weightedPick(rng, table.map((o) => o[1]))][0];
+  function spin(tier, rng = Math.random) {
+    if (tier === TIER.HOUSE) return drawOutcome(CONFIG.HOUSE_OUTCOMES, rng);
+    if (tier === TIER.FAVORABLE) return drawOutcome(CONFIG.FAVORABLE_OUTCOMES, rng);
+    if (tier === TIER.TRUE) {
+      return rng() < CONFIG.JACKPOT_CHANCE
+        ? randInt(rng, CONFIG.JACKPOT_MIN, CONFIG.JACKPOT_MAX)
+        : drawOutcome(CONFIG.FAVORABLE_OUTCOMES, rng);
+    }
+    throw new RangeError('Not a machine tier: ' + tier);
+  }
+  function tableEV(table) {
+    const w = table.reduce((a, o) => a + o[1], 0);
+    return table.reduce((a, o) => a + o[0] * o[1], 0) / w;
+  }
+  function tierEV(tier) {
+    if (tier === TIER.HOUSE) return tableEV(CONFIG.HOUSE_OUTCOMES);
+    if (tier === TIER.FAVORABLE) return tableEV(CONFIG.FAVORABLE_OUTCOMES);
+    const jackpotMean = (CONFIG.JACKPOT_MIN + CONFIG.JACKPOT_MAX) / 2;
+    return CONFIG.JACKPOT_CHANCE * jackpotMean + (1 - CONFIG.JACKPOT_CHANCE) * tableEV(CONFIG.FAVORABLE_OUTCOMES);
+  }
+  function aggregateEV(g) {
+    let sum = 0;
+    for (const t of g.tiers) if (t >= 0) sum += tierEV(t);
+    return sum;
+  }
+
+  // ---- Rendering helpers (pure) ----
+  /*
+   * §6.2 pit outline trick: a cell draws a wall on a side only when the neighbour on that
+   * side is off-grid, an aisle, or in a different pit. Sides shared with same-pit cells stay
+   * open, so every pit, however irregular, gets exactly its outer outline with no polygon math.
+   */
+  function borderSides(g, i) {
+    const pit = g.cells[i];
+    const wall = (nb) => nb < 0 || g.cells[nb] !== pit;
+    const [up, right, down, left] = neighbors(i);
+    return { top: wall(up), right: wall(right), bottom: wall(down), left: wall(left) };
+  }
+
+  // Greedy map-coloring of pits with neutral tints so touching pits never share a tint.
+  function pitTints(g, tintCount = 5) {
+    const K = g.pitSizes.length;
+    const adj = Array.from({ length: K }, () => new Set());
+    for (let i = 0; i < TOTAL; i++) {
+      const p = g.cells[i];
+      if (p < 0) continue;
+      for (const nb of neighbors(i)) {
+        if (nb >= 0 && g.cells[nb] >= 0 && g.cells[nb] !== p) adj[p].add(g.cells[nb]);
+      }
+    }
+    const tints = new Array(K).fill(-1);
+    for (let p = 0; p < K; p++) {
+      const used = new Set([...adj[p]].map((q) => tints[q]));
+      let t = 0;
+      while (t < tintCount && used.has(t)) t++;
+      tints[p] = t < tintCount ? t : p % tintCount;
+    }
+    return tints;
+  }
+
+  // Letters in reading order, so screen-reader users can group machines by pit.
+  function pitLetters(g) {
+    const letters = new Array(g.pitSizes.length).fill('');
+    let next = 0;
+    for (let i = 0; i < TOTAL; i++) {
+      const p = g.cells[i];
+      if (p >= 0 && !letters[p]) letters[p] = String.fromCharCode(65 + next++);
+    }
+    return letters;
+  }
+
+  function isPitContiguous(g, pit) {
+    const members = [];
+    for (let i = 0; i < TOTAL; i++) if (g.cells[i] === pit) members.push(i);
+    if (!members.length) return true;
+    const seen = new Set([members[0]]);
+    const stack = [members[0]];
+    while (stack.length) {
+      for (const nb of neighbors(stack.pop())) {
+        if (nb >= 0 && g.cells[nb] === pit && !seen.has(nb)) { seen.add(nb); stack.push(nb); }
+      }
+    }
+    return seen.size === members.length;
+  }
+
+  // Wrong-tap feedback: only ever describes the tapped machine, never the true one.
+  function explainMiss(g, i) {
+    const size = g.pitSizes[g.cells[i]];
+    const major = majorityInfo(countColors(g.colors)).color;
+    const reasons = [];
+    if (size !== CONFIG.TRUE_PIT_SIZE) reasons.push(`This machine's pit has ${size} machines, not ${CONFIG.TRUE_PIT_SIZE}.`);
+    if (g.colors[i] !== major) reasons.push(`This machine's color (${COLORS[g.colors[i]]}) is not the most common one on this floor.`);
+    return reasons;
+  }
+
+  // Returns a clean copy of a saved session, or null if anything is off.
+  function validateSavedState(o) {
+    if (!o || typeof o !== 'object' || o.v !== 1) return null;
+    if (!['practice', 'audit', 'success'].includes(o.phase)) return null;
+    if (validateGrid(o.grid).length) return null;
+    const g = o.grid;
+    if (!Number.isInteger(o.spinsLeft) || o.spinsLeft < 0 || o.spinsLeft > CONFIG.SPIN_BUDGET) return null;
+    if (!Number.isInteger(o.net) || Math.abs(o.net) > 1e6) return null;
+    if (!Array.isArray(o.wrongTaps) || o.wrongTaps.length > CONFIG.MACHINE_COUNT) return null;
+    for (const t of o.wrongTaps) {
+      if (!Number.isInteger(t) || t < 0 || t >= TOTAL || g.cells[t] < 0 || t === g.trueCell) return null;
+    }
+    if (new Set(o.wrongTaps).size !== o.wrongTaps.length) return null;
+    if (o.auditCode !== (o.phase === 'success' ? CONFIG.AUDIT_CODE : null)) return null;
+    return {
+      v: 1, phase: o.phase, spinsLeft: o.spinsLeft, net: o.net,
+      wrongTaps: o.wrongTaps.slice(), auditCode: o.auditCode,
+      grid: {
+        cells: g.cells.slice(), pitSizes: g.pitSizes.slice(), colors: g.colors.slice(),
+        tiers: g.tiers.slice(), majorColor: g.majorColor, trueCell: g.trueCell, contiguous: g.contiguous === true,
+      },
+    };
+  }
+
+  return {
+    CONFIG, COLORS, TIER, TOTAL, GenerationError,
+    mulberry32, neighbors, choosePitSizes, placePits, assignColors, assignTiers,
+    countColors, majorityInfo, candidates, validateGrid, generateGrid,
+    spin, tierEV, aggregateEV, borderSides, pitTints, pitLetters, isPitContiguous,
+    explainMiss, validateSavedState,
+  };
+})();
+/* LOGIC:END */
+
+/* ---------------- UI ---------------- */
+(() => {
+  'use strict';
+  const L = HouseLogic;
+  const C = L.CONFIG;
+  const STORAGE_KEY = 'house-rule:v1';
+  const SPIN_COOLDOWN_MS = 350;   // swallows accidental double-taps so one tap = one spin
+  const POP_MS = 1100;
+  const NUDGE_AFTER_WRONG = 3;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  const $ = (id) => document.getElementById(id);
+  const DEBUG = (() => {
+    try { return new URLSearchParams(location.search).get('debug') === '1'; } catch (e) { return false; }
+  })();
+
+  let state = null;
+  let cooldownUntil = 0;
+
+  // ---- Storage (resume only; every access guarded) ----
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable: play on */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? L.validateSavedState(JSON.parse(raw)) : null;
+    } catch (e) { return null; }
+  }
+
+  function freshGrid() {
+    try {
+      return L.generateGrid(Math.random);
+    } catch (e) {
+      // Never expected (the tests generate thousands of grids), but fail visibly rather than half-render.
+      console.error(e);
+      const p = document.createElement('p');
+      p.textContent = 'Something went wrong building the casino floor. Please reload the page.';
+      document.querySelector('main').replaceChildren(p);
+      throw e;
+    }
+  }
+
+  // ---- Formatting ----
+  const money = (n) => (n > 0 ? '+$' : n < 0 ? '−$' : '$') + Math.abs(n);
+  const rc = (i) => ({ r: Math.floor(i / C.COLS) + 1, c: (i % C.COLS) + 1 });
+
+  let liveTimer = 0;
+  function announce(text) {
+    const live = $('live');
+    live.textContent = '';
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => { live.textContent = text; }, 60);
+  }
+
+  // ---- Icons ----
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k of Object.keys(attrs)) node.setAttribute(k, attrs[k]);
+    return node;
+  }
+  // One distinct shape per color so the color rule never depends on hue alone.
+  function lampShape(color, cx, cy, s) {
+    const cls = 'lamp c-' + color;
+    const pts = (arr) => arr.map(([x, y]) => `${(cx + x * s).toFixed(2)},${(cy + y * s).toFixed(2)}`).join(' ');
+    switch (color) {
+      case 0: return svgEl('circle', { class: cls, cx, cy, r: 5 * s });                                   // Ruby: circle
+      case 1: return svgEl('polygon', { class: cls, points: pts([[0, -5.6], [5.4, 4.6], [-5.4, 4.6]]) });  // Amber: triangle
+      case 2: return svgEl('rect', { class: cls, x: cx - 4.5 * s, y: cy - 4.5 * s, width: 9 * s, height: 9 * s }); // Teal: square
+      case 3: return svgEl('polygon', { class: cls, points: pts([[0, -6], [6, 0], [0, 6], [-6, 0]]) });    // Violet: diamond
+      case 4: return svgEl('polygon', { class: cls, points: pts([                                          // Emerald: plus
+        [-1.8, -5.5], [1.8, -5.5], [1.8, -1.8], [5.5, -1.8], [5.5, 1.8], [1.8, 1.8],
+        [1.8, 5.5], [-1.8, 5.5], [-1.8, 1.8], [-5.5, 1.8], [-5.5, -1.8], [-1.8, -1.8]]) });
+      default: return svgEl('polygon', { class: cls, points: pts(                                          // Sapphire: hexagon
+        [0, 1, 2, 3, 4, 5].map((k) => [5.6 * Math.cos(k * Math.PI / 3), 5.6 * Math.sin(k * Math.PI / 3)])) });
+    }
+  }
+  function machineIcon(color) {
+    const svg = svgEl('svg', { viewBox: '0 0 32 32', class: 'icon', 'aria-hidden': 'true', focusable: 'false' });
+    svg.append(
+      svgEl('rect', { class: 'm-body', x: 5, y: 3, width: 21, height: 26, rx: 3 }),
+      svgEl('rect', { class: 'm-screen', x: 7.5, y: 5.5, width: 16, height: 15, rx: 2 }),
+      svgEl('path', { class: 'm-lever', d: 'M26 13h2.6V7' }),
+      svgEl('circle', { class: 'm-knob', cx: 28.6, cy: 5.6, r: 1.7 }),
+      svgEl('path', { class: 'm-tray', d: 'M10 25h11' }),
+      lampShape(color, 15.5, 13, 1),
+    );
+    return svg;
+  }
+
+  function renderLegend() {
+    const ul = $('legend');
+    ul.replaceChildren();
+    L.COLORS.forEach((name, c) => {
+      const li = document.createElement('li');
+      const svg = svgEl('svg', { viewBox: '0 0 16 16', 'aria-hidden': 'true', focusable: 'false' });
+      svg.append(lampShape(c, 8, 8, 1.15));
+      const span = document.createElement('span');
+      span.textContent = name;
+      li.append(svg, span);
+      ul.append(li);
+    });
+  }
+
+  // ---- Grid ----
+  // mode: 'practice' | 'audit' (machines are buttons) or 'review' (static, success screen)
+  function renderGrid(container, g, mode) {
+    container.replaceChildren();
+    container.style.setProperty('--cols', String(C.COLS));
+    if (mode !== 'review') container.setAttribute('aria-label', `Casino floor, ${C.ROWS} by ${C.COLS}`);
+    const tints = L.pitTints(g);
+    const letters = L.pitLetters(g);
+    for (let i = 0; i < L.TOTAL; i++) {
+      const pit = g.cells[i];
+      if (pit < 0) {
+        const aisle = document.createElement('div');
+        aisle.className = 'cell aisle';
+        aisle.setAttribute('aria-hidden', 'true');
+        container.append(aisle);
+        continue;
+      }
+      const color = g.colors[i];
+      const node = document.createElement(mode === 'review' ? 'div' : 'button');
+      if (mode !== 'review') node.type = 'button';
+      node.className = 'cell machine tint-' + tints[pit];
+      const b = L.borderSides(g, i);
+      if (b.top) node.classList.add('bt');
+      if (b.right) node.classList.add('br');
+      if (b.bottom) node.classList.add('bb');
+      if (b.left) node.classList.add('bl');
+      node.dataset.cell = String(i);
+      const { r, c } = rc(i);
+      const label = `${L.COLORS[color]} machine, row ${r}, column ${c}, pit ${letters[pit]}`;
+      node.setAttribute('aria-label', label);
+      node.dataset.label = label;
+      node.title = L.COLORS[color];
+      if (mode === 'review') node.setAttribute('role', 'img');
+      node.append(machineIcon(color));
+      if (DEBUG && i === g.trueCell) node.classList.add('is-debug-true');
+      container.append(node);
+    }
+  }
+
+  function cellNode(i) {
+    return $('floor-grid').querySelector(`[data-cell="${i}"]`);
+  }
+
+  function markWrong(i) {
+    const node = cellNode(i);
+    if (!node || node.classList.contains('is-wrong')) return;
+    node.classList.add('is-wrong');
+    node.setAttribute('aria-label', node.dataset.label + ', already ruled out');
+    const x = document.createElement('span');
+    x.className = 'wrong-mark';
+    x.setAttribute('aria-hidden', 'true');
+    x.textContent = '✕';
+    node.append(x);
+  }
+
+  function showPop(i, amount) {
+    const node = cellNode(i);
+    if (!node) return;
+    const pop = document.createElement('span');
+    pop.className = 'pop ' + (amount > 0 ? 'win' : amount < 0 ? 'loss' : 'even');
+    pop.setAttribute('aria-hidden', 'true');
+    pop.textContent = money(amount);
+    node.append(pop);
+    setTimeout(() => pop.remove(), POP_MS);
+  }
+
+  // ---- Screens ----
+  function showScreen(id, focusHeading) {
+    for (const s of ['screen-intro', 'screen-floor', 'screen-success']) $(s).hidden = s !== id;
+    if (focusHeading) {
+      const h = $(id).querySelector('h1, h2');
+      if (h) h.focus();
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function updateBar() {
+    $('stat-spins').textContent = `${state.spinsLeft} / ${C.SPIN_BUDGET} spins left`;
+    $('stat-net').textContent = money(state.net);
+    if (state.phase === 'practice') {
+      const out = state.spinsLeft <= 0;
+      for (const btn of $('floor-grid').querySelectorAll('button.machine')) btn.disabled = out;
+      const msg = $('floor-msg');
+      msg.className = 'msg';
+      msg.textContent = out ? 'Out of spins for this casino. Open a New Casino, or take the Audit when you’re ready.' : '';
+    }
+  }
+
+  function renderDebug() {
+    const box = $('debug');
+    if (!DEBUG) { box.hidden = true; return; }
+    const g = state.grid;
+    const info = L.majorityInfo(L.countColors(g.colors));
+    const pit = g.cells[g.trueCell];
+    const { r, c } = rc(g.trueCell);
+    const ev = L.aggregateEV(g);
+    const rows = [
+      ['True machine', `row ${r}, col ${c} (cell ${g.trueCell})`],
+      ['Pit', `id ${pit} (letter ${L.pitLetters(g)[pit]}), size ${g.pitSizes[pit]}`],
+      ['Pit sizes', g.pitSizes.slice().sort((a, b) => a - b).join(', ') + ` (K=${g.pitSizes.length})`],
+      ['Size-4 pits', String(g.pitSizes.filter((s) => s === C.TRUE_PIT_SIZE).length)],
+      ['All contiguous', g.contiguous ? 'yes' : 'no (fallback used)'],
+      ['Majority color', `${L.COLORS[info.color]} ×${info.count}`],
+      ['Runner-up', `${L.COLORS[info.runnerUp]} ×${info.runnerUpCount} (margin ${info.margin})`],
+      ['Tier EVs', `house ${L.tierEV(0).toFixed(2)}, favorable ${L.tierEV(1).toFixed(2)}, true ${L.tierEV(2).toFixed(2)}`],
+      ['Sum of EV, all 50', `${ev >= 0 ? '+' : '−'}$${Math.abs(ev).toFixed(2)} per spin of each machine (${ev >= 0 ? 'net-positive' : 'NOT net-positive'} for customers)`],
+    ];
+    const h = document.createElement('h3');
+    h.textContent = 'Debug view (?debug=1)';
+    const dl = document.createElement('dl');
+    for (const [k, v] of rows) {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+    box.replaceChildren(h, dl);
+    box.hidden = false;
+  }
+
+  function renderFloor(focusHeading) {
+    const audit = state.phase === 'audit';
+    $('floor-eyebrow').textContent = audit ? 'Final Audit' : 'Practice';
+    $('floor-title').textContent = audit ? 'Final Audit' : 'Practice Floor';
+    $('floor-lede').textContent = audit
+      ? 'No more spins. Tap the one machine you believe is rigged in the customer’s favor.'
+      : 'Look at the floor as long as you like; looking is free. Tap a machine to spin it.';
+    $('stats').hidden = audit;
+    $('practice-actions').hidden = audit;
+    $('audit-actions').hidden = !audit;
+    const msg = $('floor-msg');
+    msg.className = 'msg';
+    msg.textContent = '';
+    renderGrid($('floor-grid'), state.grid, state.phase);
+    if (audit) {
+      state.wrongTaps.forEach(markWrong);
+      if (state.wrongTaps.length) showMissFeedback(state.wrongTaps[state.wrongTaps.length - 1], false);
+    } else {
+      updateBar();
+    }
+    renderDebug();
+    showScreen('screen-floor', focusHeading);
+  }
+
+  function renderSuccess(focusHeading) {
+    const g = state.grid;
+    $('audit-code').textContent = state.auditCode;
+    renderGrid($('success-grid'), g, 'review');
+    const found = $('success-grid').querySelector(`[data-cell="${g.trueCell}"]`);
+    if (found) {
+      found.classList.add('is-found');
+      found.setAttribute('aria-label', found.getAttribute('aria-label') + ', the machine you found');
+    }
+    const info = L.majorityInfo(L.countColors(g.colors));
+    const { r, c } = rc(g.trueCell);
+    $('success-why').textContent =
+      `Row ${r}, column ${c}. It sits in a pit of exactly ${g.pitSizes[g.cells[g.trueCell]]} machines, ` +
+      `and it's ${L.COLORS[g.colors[g.trueCell]]}, the most common color on this floor ` +
+      `(${info.count} of ${C.MACHINE_COUNT} machines; next is ${L.COLORS[info.runnerUp]} with ${info.runnerUpCount}). ` +
+      `It's the only machine that satisfies both rules.`;
+    showScreen('screen-success', focusHeading);
+  }
+
+  function render(focusHeading) {
+    if (state.phase === 'success') renderSuccess(focusHeading);
+    else renderFloor(focusHeading);
+  }
+
+  // ---- Transitions ----
+  function enterPractice(resetNet) {
+    state = {
+      v: 1, phase: 'practice', grid: freshGrid(), spinsLeft: C.SPIN_BUDGET,
+      net: resetNet || !state ? 0 : state.net, wrongTaps: [], auditCode: null,
+    };
+    save();
+    return state;
+  }
+
+  function startAudit() {
+    state = { ...state, phase: 'audit', grid: freshGrid(), spinsLeft: 0, wrongTaps: [], auditCode: null };
+    save();
+    render(true);
+    announce('Final Audit. No more spins. Choose the one machine you believe is rigged in the customer’s favor.');
+  }
+
+  function showMissFeedback(i, speak) {
+    const reasons = L.explainMiss(state.grid, i);
+    const msg = $('floor-msg');
+    msg.className = 'msg bad';
+    msg.textContent = 'Not this one. ' + reasons.join(' ');
+    if (state.wrongTaps.length >= NUDGE_AFTER_WRONG) {
+      const nudge = document.createElement('span');
+      nudge.className = 'nudge';
+      nudge.textContent = ' Guessing won’t get you there. Consider going back to Practice and comparing a few more casinos.';
+      msg.append(nudge);
+    }
+    if (speak) announce(msg.textContent);
+  }
+
+  function onMachine(i) {
+    const g = state.grid;
+    if (g.cells[i] < 0) return;
+    if (state.phase === 'practice') {
+      const now = Date.now();
+      if (state.spinsLeft <= 0 || now < cooldownUntil) return;
+      cooldownUntil = now + SPIN_COOLDOWN_MS;
+      const amount = L.spin(g.tiers[i]);
+      state.spinsLeft -= 1;
+      state.net += amount;
+      save();
+      showPop(i, amount);
+      updateBar();
+      const { r, c } = rc(i);
+      const result = amount > 0 ? `won $${amount}` : amount < 0 ? `lost $${-amount}` : 'broke even';
+      announce(`Row ${r}, column ${c}: ${result}. ${state.spinsLeft} spins left.` +
+        (state.spinsLeft === 0 ? ' Out of spins for this casino.' : ''));
+    } else if (state.phase === 'audit') {
+      if (i === g.trueCell) {
+        state = { ...state, phase: 'success', auditCode: C.AUDIT_CODE };
+        save();
+        render(true);
+        announce(`Audit passed. Your audit code is ${state.auditCode.split('').join(' ')}.`);
+      } else {
+        if (!state.wrongTaps.includes(i)) state.wrongTaps.push(i);
+        save();
+        markWrong(i);
+        showMissFeedback(i, true);
+      }
+    }
+  }
+
+  // ---- Wiring ----
+  $('floor-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('button.machine');
+    if (!btn || btn.disabled) return;
+    onMachine(Number(btn.dataset.cell));
+  });
+  $('btn-enter').addEventListener('click', () => {
+    enterPractice(true);
+    render(true);
+    announce(`Practice floor ready. ${C.SPIN_BUDGET} spins for this casino.`);
+  });
+  $('btn-new').addEventListener('click', () => {
+    enterPractice(false);
+    render(false);
+    announce(`New casino. ${C.SPIN_BUDGET} spins for this casino.`);
+  });
+  $('btn-audit').addEventListener('click', startAudit);
+  $('btn-back').addEventListener('click', () => {
+    enterPractice(false);
+    render(true);
+    announce(`Back to practice. New casino, ${C.SPIN_BUDGET} spins.`);
+  });
+  $('btn-again').addEventListener('click', () => {
+    enterPractice(true);
+    render(true);
+    announce(`New session. Practice floor ready, ${C.SPIN_BUDGET} spins.`);
+  });
+
+  // ---- Boot: resume a valid saved session, otherwise show the intro ----
+  renderLegend();
+  state = load();
+  if (state) render(false);
+  else showScreen('screen-intro', false);
+})();
+</script>
+</body>
+</html>
