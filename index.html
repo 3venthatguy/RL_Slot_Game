@@ -139,6 +139,7 @@
   .stat-label { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-right: 0.4rem; }
   .stat-value { font-variant-numeric: tabular-nums; font-weight: 700; }
   .msg { min-height: 1.5em; font-weight: 600; margin: 0.25rem 0 0.75rem; }
+  .msg.fail { color: var(--loss); }
 
   /* ---------- Board ---------- */
   .board {
@@ -189,11 +190,6 @@
   .c-4 { fill: var(--c-emerald); }
   .c-5 { fill: var(--c-sapphire); }
 
-  .cell.is-wrong .icon { opacity: 0.35; }
-  .wrong-mark {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--loss); font-size: 1.1rem; font-weight: 700; pointer-events: none;
-  }
   .cell.is-found { box-shadow: 0 0 0 3px var(--found), inset 0 0 0 3px var(--found); z-index: 1; }
   .cell.is-debug-true { outline: 3px dashed var(--debug); outline-offset: -6px; }
 
@@ -223,6 +219,7 @@
   }
   .legend li { display: flex; align-items: center; gap: 4px; }
   .legend svg { width: 18px; height: 18px; }
+  .legend-count { color: var(--text); font-variant-numeric: tabular-nums; margin-left: 2px; }
 
   /* ---------- Success ---------- */
   .code {
@@ -264,6 +261,7 @@
       <p>Most machines quietly favor the house. A few lean your way. One is rigged heavily in the customer's favor, and nothing on it says so.</p>
       <p>Every floor in the chain is laid out by the same two house rules. The layout tells the story. Spinning helps a little, but you only get a handful of spins per casino.</p>
       <p>Learn to read the floor, then prove it on a floor you've never seen.</p>
+      <p class="msg fail" id="intro-fail-msg" hidden>Audit failed. Start again.</p>
       <div class="actions"><button type="button" class="btn" id="btn-enter">Enter the Casino</button></div>
     </div>
   </section>
@@ -286,7 +284,7 @@
     </div>
     <div class="board" id="floor-grid" role="group" aria-label="Casino floor"></div>
     <div class="pad">
-      <ul class="legend" id="legend" aria-label="Machine colors"></ul>
+      <ul class="legend" id="legend" aria-label="Machines on this floor by color"></ul>
       <div class="actions" id="audit-actions">
         <button type="button" class="btn secondary" id="btn-back">Back to Practice</button>
       </div>
@@ -775,15 +773,9 @@ const HouseLogic = (() => {
     const g = o.grid;
     if (!Number.isInteger(o.spinsLeft) || o.spinsLeft < 0 || o.spinsLeft > CONFIG.SPIN_BUDGET) return null;
     if (!Number.isInteger(o.net) || Math.abs(o.net) > 1e6) return null;
-    if (!Array.isArray(o.wrongTaps) || o.wrongTaps.length > CONFIG.MACHINE_COUNT) return null;
-    for (const t of o.wrongTaps) {
-      if (!Number.isInteger(t) || t < 0 || t >= TOTAL || g.cells[t] < 0 || t === g.trueCell) return null;
-    }
-    if (new Set(o.wrongTaps).size !== o.wrongTaps.length) return null;
     if (o.auditCode !== (o.phase === 'success' ? CONFIG.AUDIT_CODE : null)) return null;
     return {
-      v: 1, phase: o.phase, spinsLeft: o.spinsLeft, net: o.net,
-      wrongTaps: o.wrongTaps.slice(), auditCode: o.auditCode,
+      v: 1, phase: o.phase, spinsLeft: o.spinsLeft, net: o.net, auditCode: o.auditCode,
       grid: {
         cells: g.cells.slice(), pitSizes: g.pitSizes.slice(), colors: g.colors.slice(),
         tiers: g.tiers.slice(), majorColor: g.majorColor, trueCell: g.trueCell, contiguous: g.contiguous === true,
@@ -819,13 +811,15 @@ const HouseLogic = (() => {
   let state = null;
   let cooldownUntil = 0;
 
-  // ---- Storage (resume only; every access guarded) ----
+  // ---- Storage (every access guarded) ----
+  // sessionStorage is per browser tab: a refresh resumes where you were, but every new
+  // visit (new tab, window, or browser restart) starts back at the home page.
   function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable: play on */ }
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable: play on */ }
   }
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = sessionStorage.getItem(STORAGE_KEY);
       return raw ? L.validateSavedState(JSON.parse(raw)) : null;
     } catch (e) { return null; }
   }
@@ -890,8 +884,10 @@ const HouseLogic = (() => {
     return svg;
   }
 
-  function renderLegend() {
+  // Legend doubles as a per-color machine count for the whole floor.
+  function renderLegend(g) {
     const ul = $('legend');
+    const counts = L.countColors(g.colors);
     ul.replaceChildren();
     L.COLORS.forEach((name, c) => {
       const li = document.createElement('li');
@@ -899,7 +895,11 @@ const HouseLogic = (() => {
       svg.append(lampShape(c, 8, 8, 1.15));
       const span = document.createElement('span');
       span.textContent = name;
-      li.append(svg, span);
+      const count = document.createElement('strong');
+      count.className = 'legend-count';
+      count.textContent = String(counts[c]);
+      li.append(svg, span, count);
+      li.setAttribute('aria-label', `${name}: ${counts[c]} machines`);
       ul.append(li);
     });
   }
@@ -945,18 +945,6 @@ const HouseLogic = (() => {
 
   function cellNode(i) {
     return $('floor-grid').querySelector(`[data-cell="${i}"]`);
-  }
-
-  function markWrong(i) {
-    const node = cellNode(i);
-    if (!node || node.classList.contains('is-wrong')) return;
-    node.classList.add('is-wrong');
-    node.setAttribute('aria-label', node.dataset.label + ', already ruled out');
-    const x = document.createElement('span');
-    x.className = 'wrong-mark';
-    x.setAttribute('aria-hidden', 'true');
-    x.textContent = '✕';
-    node.append(x);
   }
 
   function showPop(i, amount) {
@@ -1037,11 +1025,8 @@ const HouseLogic = (() => {
     msg.className = 'msg';
     msg.textContent = '';
     renderGrid($('floor-grid'), state.grid, state.phase);
-    if (audit) {
-      state.wrongTaps.forEach(markWrong);
-    } else {
-      updateBar();
-    }
+    renderLegend(state.grid);
+    if (!audit) updateBar();
     renderDebug();
     showScreen('screen-floor', focusHeading);
   }
@@ -1071,20 +1056,31 @@ const HouseLogic = (() => {
   }
 
   // ---- Transitions ----
-  function enterPractice(resetNet) {
+  // Every new casino starts with a full spin budget and net winnings back at $0.
+  function enterPractice() {
     state = {
       v: 1, phase: 'practice', grid: freshGrid(), spinsLeft: C.SPIN_BUDGET,
-      net: resetNet || !state ? 0 : state.net, wrongTaps: [], auditCode: null,
+      net: 0, auditCode: null,
     };
     save();
     return state;
   }
 
   function startAudit() {
-    state = { ...state, phase: 'audit', grid: freshGrid(), spinsLeft: 0, wrongTaps: [], auditCode: null };
+    state = { ...state, phase: 'audit', grid: freshGrid(), spinsLeft: 0, auditCode: null };
     save();
     render(true);
     announce('Final Audit. No more spins. Choose the one machine you believe is rigged in the customer’s favor.');
+  }
+
+  // A wrong tap in the Final Audit ends the attempt: clear the session and send
+  // them back to the home page to start over, so they can't brute-force the grid.
+  function failAudit() {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* storage unavailable: state is cleared below regardless */ }
+    state = null;
+    showScreen('screen-intro', true);
+    $('intro-fail-msg').hidden = false;
+    announce('Audit failed. Start again.');
   }
 
   function onMachine(i) {
@@ -1111,10 +1107,9 @@ const HouseLogic = (() => {
         render(true);
         announce(`Audit passed. Your audit code is ${state.auditCode.split('').join(' ')}.`);
       } else {
-        // Deliberately no feedback text: a wrong answer gives no clue about the rules.
-        if (!state.wrongTaps.includes(i)) state.wrongTaps.push(i);
-        save();
-        markWrong(i);
+        // Deliberately no feedback about why: a wrong answer gives no clue about the rules,
+        // and ends the attempt rather than letting them keep guessing on this grid.
+        failAudit();
       }
     }
   }
@@ -1126,29 +1121,29 @@ const HouseLogic = (() => {
     onMachine(Number(btn.dataset.cell));
   });
   $('btn-enter').addEventListener('click', () => {
-    enterPractice(true);
+    $('intro-fail-msg').hidden = true;
+    enterPractice();
     render(true);
     announce(`Practice floor ready. ${C.SPIN_BUDGET} spins for this casino.`);
   });
   $('btn-new').addEventListener('click', () => {
-    enterPractice(false);
+    enterPractice();
     render(false);
     announce(`New casino. ${C.SPIN_BUDGET} spins for this casino.`);
   });
   $('btn-audit').addEventListener('click', startAudit);
   $('btn-back').addEventListener('click', () => {
-    enterPractice(false);
+    enterPractice();
     render(true);
     announce(`Back to practice. New casino, ${C.SPIN_BUDGET} spins.`);
   });
   $('btn-again').addEventListener('click', () => {
-    enterPractice(true);
+    enterPractice();
     render(true);
     announce(`New session. Practice floor ready, ${C.SPIN_BUDGET} spins.`);
   });
 
-  // ---- Boot: resume a valid saved session, otherwise show the intro ----
-  renderLegend();
+  // ---- Boot: resume this tab's session after a refresh, otherwise show the intro ----
   state = load();
   if (state) render(false);
   else showScreen('screen-intro', false);

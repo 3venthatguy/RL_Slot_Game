@@ -197,14 +197,14 @@ test('audit code is always BANDIT', () => {
 });
 
 test('validateSavedState accepts a real session and rejects junk', () => {
-  const good = { v: 1, phase: 'practice', grid: grids[3], spinsLeft: 9, net: -4, wrongTaps: [], auditCode: null };
+  const good = { v: 1, phase: 'practice', grid: grids[3], spinsLeft: 9, net: -4, auditCode: null };
   const clean = L.validateSavedState(JSON.parse(JSON.stringify(good)));
   assert.ok(clean);
   assert.equal(clean.spinsLeft, 9);
   const bad = [
     null, 42, 'x', {}, { ...good, v: 2 }, { ...good, phase: 'win' }, { ...good, spinsLeft: 16 },
-    { ...good, spinsLeft: -1 }, { ...good, net: 1.5 }, { ...good, wrongTaps: [grids[3].trueCell] },
-    { ...good, wrongTaps: 'no' }, { ...good, auditCode: 'BANDIT' }, { ...good, phase: 'success', auditCode: null },
+    { ...good, spinsLeft: -1 }, { ...good, net: 1.5 },
+    { ...good, auditCode: 'BANDIT' }, { ...good, phase: 'success', auditCode: null },
     { ...good, phase: 'success', auditCode: 'K7QM2P' },
     { ...good, grid: { ...grids[3], cells: grids[3].cells.slice(1) } },
     { ...good, grid: { ...grids[3], majorColor: (grids[3].majorColor + 1) % 6 } },

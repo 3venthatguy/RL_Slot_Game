@@ -9,6 +9,7 @@ A single-file browser game for a reinforcement-learning workshop. Teams audit a 
 - **The color rule is global on purpose.** "Most common color on the whole floor" makes players look at the entire grid, not just a local neighborhood. The margin of 4 or more keeps the rule unambiguous without making it trivial.
 - **Spin payouts are supporting evidence.** The true machine pays a $15–$25 jackpot on half its spins, so spinning it a couple of times usually gives it away. But with 50 machines and 15 spins per casino, teams rarely happen to spin it, and payout tiers are assigned independently of pit and color, so structure is still how you find it.
 - **The Final Audit disables spinning.** Teams have to name the machine on a floor they've never seen, using only structure. That proves they learned the rule rather than memorizing or sampling.
+- **A wrong Audit tap ends the attempt.** One incorrect tap clears the session and sends the team back to the home page with no explanation of why they were wrong, so they can't brute-force the grid by process of elimination or learn the rule from failed guesses. They have to re-enter Practice and pass an Audit on a floor they haven't seen guesses on.
 
 ## Files
 
@@ -67,7 +68,7 @@ The game is a single static file with no network requests, so any static host wo
 
 ## Saved progress
 
-The game saves the current session to `localStorage` (key `house-rule:v1`), only so an accidental refresh doesn't lose progress. A refresh mid-practice **resumes the same casino with the same remaining spins**, so refreshing never refills the budget. A refresh in the Audit resumes the same audit grid, and a refresh on the success screen keeps the audit code. Saved data is fully validated on load and silently discarded if anything is off. If storage is blocked, the game still works; it just starts fresh at the intro after a reload.
+Every new visit (a new tab or window, or reopening the file or site) starts at the home page. Within a tab, the game saves the current session to `sessionStorage` (key `house-rule:v1`) only so an accidental refresh doesn't lose progress. A refresh mid-practice **resumes the same casino with the same remaining spins**, so refreshing never refills the budget. Net winnings reset to $0 with every new casino. A refresh in the Audit resumes the same audit grid (a wrong tap, not a refresh, is what ends the attempt), and a refresh on the success screen keeps the audit code. Saved data is fully validated on load and silently discarded if anything is off. If storage is blocked, the game still works; it just starts fresh at the intro after a reload.
 
 ## Facilitator debug view
 
