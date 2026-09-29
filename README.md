@@ -7,7 +7,7 @@ A single-file browser game for a reinforcement-learning workshop. Teams audit a 
 - **The lesson is generalizing a rule, not exploiting one layout.** Every practice casino is freshly generated. The two rules never change, but where they apply does. Teams have to infer the rule from many examples, the way a policy has to generalize across environments.
 - **Pits are an explicit grouping.** Pits can touch each other on the floor, so empty space alone doesn't always separate clusters. The generator assigns each machine to a pit and draws each pit's outline, so "pit size" is readable at a glance instead of a puzzle about adjacency.
 - **The color rule is global on purpose.** "Most common color on the whole floor" makes players look at the entire grid, not just a local neighborhood. The margin of 4 or more keeps the rule unambiguous without making it trivial.
-- **Spin payouts are weak, noisy evidence.** The true machine behaves like an ordinary favorable machine 90% of the time, and payout tiers are assigned independently of pit and color. A 15-spin budget rarely surfaces the jackpot, so structure beats spin data.
+- **Spin payouts are supporting evidence.** The true machine pays a $15–$25 jackpot on half its spins, so spinning it a couple of times usually gives it away. But with 50 machines and 15 spins per casino, teams rarely happen to spin it, and payout tiers are assigned independently of pit and color, so structure is still how you find it.
 - **The Final Audit disables spinning.** Teams have to name the machine on a floor they've never seen, using only structure. That proves they learned the rule rather than memorizing or sampling.
 
 ## Files
@@ -51,7 +51,7 @@ All tunables are in the `CONFIG` object at the top of the logic block in `index.
 | `HOUSE_OUTCOMES` | `[-2..+1]`, EV −0.50 | Payout table `[dollars, weight]` for the 35 house machines |
 | `FAVORABLE_OUTCOMES` | `[-1..+2]`, EV +0.30 | Payout table for the 14 favorable machines (and the true machine's normal spins) |
 | `FAVORABLE_COUNT` | 14 | Number of favorable machines; house = 49 − this |
-| `JACKPOT_CHANCE`, `JACKPOT_MIN`, `JACKPOT_MAX` | 0.1, 15, 25 | The true machine's heavy tail |
+| `JACKPOT_CHANCE`, `JACKPOT_MIN`, `JACKPOT_MAX` | 0.5, 15, 25 | Chance and range of the true machine's jackpot |
 | `SPIN_BUDGET` | 15 | Spins per practice casino |
 | `AUDIT_CODE` | `BANDIT` | Code shown on every passed audit |
 

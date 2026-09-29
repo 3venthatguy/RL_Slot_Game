@@ -347,7 +347,7 @@ const HouseLogic = (() => {
     // Payout tables: [dollars, weight]
     HOUSE_OUTCOMES: Object.freeze([[-2, 1], [-1, 1], [0, 1], [1, 1]].map(Object.freeze)),     // EV -0.50
     FAVORABLE_OUTCOMES: Object.freeze([[-1, 3], [0, 3], [1, 2], [2, 2]].map(Object.freeze)),  // EV +0.30
-    JACKPOT_CHANCE: 0.1,            // true machine only
+    JACKPOT_CHANCE: 0.5,            // true machine only: half its spins pay a jackpot
     JACKPOT_MIN: 15,
     JACKPOT_MAX: 25,
     SPIN_BUDGET: 15,                // spins per practice casino

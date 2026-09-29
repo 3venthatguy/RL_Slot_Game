@@ -172,12 +172,14 @@ test('spin draws stay in range and tier EVs match the spec', () => {
   assert.ok(draws[2].every((v) => (v >= -1 && v <= 2) || (v >= 15 && v <= 25)));
   assert.ok(Math.abs(mean(draws[0]) - -0.5) < 0.03);
   assert.ok(Math.abs(mean(draws[1]) - 0.3) < 0.03);
-  assert.ok(Math.abs(mean(draws[2]) - L.tierEV(2)) < 0.12);
+  assert.ok(Math.abs(mean(draws[2]) - L.tierEV(2)) < 0.2);
   const jackpotRate = draws[2].filter((v) => v >= 15).length / draws[2].length;
-  assert.ok(Math.abs(jackpotRate - 0.1) < 0.01);
+  assert.equal(C.JACKPOT_CHANCE, 0.5);
+  assert.ok(Math.abs(jackpotRate - C.JACKPOT_CHANCE) < 0.01, `jackpot rate ${jackpotRate}`);
   assert.ok(Math.abs(L.tierEV(0) - -0.5) < 1e-9);
   assert.ok(Math.abs(L.tierEV(1) - 0.3) < 1e-9);
-  assert.ok(L.tierEV(2) >= 1.75 && L.tierEV(2) <= 2.7);
+  // 0.5 x mean jackpot $20 + 0.5 x favorable $0.30
+  assert.ok(Math.abs(L.tierEV(2) - 10.15) < 1e-9);
   assert.throws(() => L.spin(-1, r));
 });
 
