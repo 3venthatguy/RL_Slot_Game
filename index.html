@@ -139,8 +139,6 @@
   .stat-label { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-right: 0.4rem; }
   .stat-value { font-variant-numeric: tabular-nums; font-weight: 700; }
   .msg { min-height: 1.5em; font-weight: 600; margin: 0.25rem 0 0.75rem; }
-  .msg.bad { color: var(--loss); }
-  .msg .nudge { display: block; font-weight: 400; color: var(--muted); margin-top: 0.25rem; }
 
   /* ---------- Board ---------- */
   .board {
@@ -768,15 +766,6 @@ const HouseLogic = (() => {
     return seen.size === members.length;
   }
 
-  // Wrong-tap feedback: only ever describes the tapped machine, never the true one.
-  function explainMiss(g, i) {
-    const size = g.pitSizes[g.cells[i]];
-    const major = majorityInfo(countColors(g.colors)).color;
-    const reasons = [];
-    if (size !== CONFIG.TRUE_PIT_SIZE) reasons.push(`This machine's pit has ${size} machines, not ${CONFIG.TRUE_PIT_SIZE}.`);
-    if (g.colors[i] !== major) reasons.push(`This machine's color (${COLORS[g.colors[i]]}) is not the most common one on this floor.`);
-    return reasons;
-  }
 
   // Returns a clean copy of a saved session, or null if anything is off.
   function validateSavedState(o) {
@@ -807,7 +796,7 @@ const HouseLogic = (() => {
     mulberry32, neighbors, choosePitSizes, placePits, assignColors, assignTiers,
     countColors, majorityInfo, candidates, validateGrid, generateGrid,
     spin, tierEV, aggregateEV, borderSides, pitTints, pitLetters, isPitContiguous,
-    explainMiss, validateSavedState,
+    validateSavedState,
   };
 })();
 /* LOGIC:END */
@@ -820,7 +809,6 @@ const HouseLogic = (() => {
   const STORAGE_KEY = 'house-rule:v1';
   const SPIN_COOLDOWN_MS = 350;   // swallows accidental double-taps so one tap = one spin
   const POP_MS = 1100;
-  const NUDGE_AFTER_WRONG = 3;
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   const $ = (id) => document.getElementById(id);
@@ -1051,7 +1039,6 @@ const HouseLogic = (() => {
     renderGrid($('floor-grid'), state.grid, state.phase);
     if (audit) {
       state.wrongTaps.forEach(markWrong);
-      if (state.wrongTaps.length) showMissFeedback(state.wrongTaps[state.wrongTaps.length - 1], false);
     } else {
       updateBar();
     }
@@ -1100,20 +1087,6 @@ const HouseLogic = (() => {
     announce('Final Audit. No more spins. Choose the one machine you believe is rigged in the customer’s favor.');
   }
 
-  function showMissFeedback(i, speak) {
-    const reasons = L.explainMiss(state.grid, i);
-    const msg = $('floor-msg');
-    msg.className = 'msg bad';
-    msg.textContent = 'Not this one. ' + reasons.join(' ');
-    if (state.wrongTaps.length >= NUDGE_AFTER_WRONG) {
-      const nudge = document.createElement('span');
-      nudge.className = 'nudge';
-      nudge.textContent = ' Guessing won’t get you there. Consider going back to Practice and comparing a few more casinos.';
-      msg.append(nudge);
-    }
-    if (speak) announce(msg.textContent);
-  }
-
   function onMachine(i) {
     const g = state.grid;
     if (g.cells[i] < 0) return;
@@ -1138,10 +1111,10 @@ const HouseLogic = (() => {
         render(true);
         announce(`Audit passed. Your audit code is ${state.auditCode.split('').join(' ')}.`);
       } else {
+        // Deliberately no feedback text: a wrong answer gives no clue about the rules.
         if (!state.wrongTaps.includes(i)) state.wrongTaps.push(i);
         save();
         markWrong(i);
-        showMissFeedback(i, true);
       }
     }
   }

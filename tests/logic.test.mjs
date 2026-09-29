@@ -188,20 +188,6 @@ test('aggregateEV is computed from the tiers (35 house + 14 favorable + 1 true)'
   for (const g of grids.slice(0, 50)) assert.ok(Math.abs(L.aggregateEV(g) - expected) < 1e-9);
 });
 
-test('explainMiss describes only the tapped machine and names the failed rule(s)', () => {
-  for (const g of grids.slice(0, 300)) {
-    for (const i of machinesOf(g)) {
-      if (i === g.trueCell) continue;
-      const reasons = L.explainMiss(g, i);
-      assert.ok(reasons.length >= 1 && reasons.length <= 2);
-      const pitOk = inS4(g, i), colorOk = g.colors[i] === g.majorColor;
-      assert.equal(reasons.some((s) => /pit has/.test(s)), !pitOk);
-      assert.equal(reasons.some((s) => /color/.test(s)), !colorOk);
-      assert.ok(!reasons.some((s) => /row|column/i.test(s)));
-    }
-  }
-});
-
 test('every pit has 3-7 machines', () => {
   for (const g of grids) for (const s of g.pitSizes) assert.ok(s >= 3 && s <= 7, `size ${s}`);
 });

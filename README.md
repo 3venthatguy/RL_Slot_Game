@@ -55,7 +55,7 @@ All tunables are in the `CONFIG` object at the top of the logic block in `index.
 | `SPIN_BUDGET` | 15 | Spins per practice casino |
 | `AUDIT_CODE` | `BANDIT` | Code shown on every passed audit |
 
-UI timing constants (`SPIN_COOLDOWN_MS`, `NUDGE_AFTER_WRONG`) sit at the top of the UI script. The grid shape (`ROWS`, `COLS`, `MACHINE_COUNT`, `AISLE_COUNT`, currently 12×12 / 50 / 94) is also in `CONFIG`; `AISLE_COUNT` must equal `ROWS × COLS − MACHINE_COUNT`, and the board picks up `COLS` automatically. Run the tests after any change: they check every invariant the game relies on.
+The UI timing constant `SPIN_COOLDOWN_MS` sits at the top of the UI script. The grid shape (`ROWS`, `COLS`, `MACHINE_COUNT`, `AISLE_COUNT`, currently 12×12 / 50 / 94) is also in `CONFIG`; `AISLE_COUNT` must equal `ROWS × COLS − MACHINE_COUNT`, and the board picks up `COLS` automatically. Run the tests after any change: they check every invariant the game relies on.
 
 ## Hosting
 
