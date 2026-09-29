@@ -7,9 +7,9 @@ A single-file browser game for a reinforcement-learning workshop. Teams audit a 
 - **The lesson is generalizing a rule, not exploiting one layout.** Every practice casino is freshly generated. The two rules never change, but where they apply does. Teams have to infer the rule from many examples, the way a policy has to generalize across environments.
 - **Pits are an explicit grouping.** Pits can touch each other on the floor, so empty space alone doesn't always separate clusters. The generator assigns each machine to a pit and draws each pit's outline, so "pit size" is readable at a glance instead of a puzzle about adjacency.
 - **The color rule is global on purpose.** "Most common color on the whole floor" makes players look at the entire grid, not just a local neighborhood. The margin of 4 or more keeps the rule unambiguous without making it trivial.
-- **Spin payouts are supporting evidence.** The true machine pays a $15–$25 jackpot on half its spins, so spinning it a couple of times usually gives it away. But with 50 machines and 15 spins per casino, teams rarely happen to spin it, and payout tiers are assigned independently of pit and color, so structure is still how you find it.
+- **Payouts form a gradient toward the answer.** Every machine gets a graded score from the same two rules, read as distances instead of pass/fail: how close its pit size is to 4, and how common its color is relative to the majority color. The two parts are weighted and summed into a score from 0 to 1. The true machine is always the unique 1. Machines scoring at or below `WARM_THRESHOLD` pay like plain house machines. Above it, spins increasingly draw from a warm table that can pay +$2 or +$3, which house machines never do. So a machine that is "almost right" pays noticeably better and points teams in the right direction. About 15 machines per floor end up favoring the customer, so most still favor the house. The true machine still pays a $15–$25 jackpot on half its spins.
 - **The Final Audit disables spinning.** Teams have to name the machine on a floor they've never seen, using only structure. That proves they learned the rule rather than memorizing or sampling.
-- **A wrong Audit tap ends the attempt.** One incorrect tap clears the session and sends the team back to the home page with no explanation of why they were wrong, so they can't brute-force the grid by process of elimination or learn the rule from failed guesses. They have to re-enter Practice and pass an Audit on a floor they haven't seen guesses on.
+- **The Final Audit gives 5 tries, with no rule explanation ever shown.** A wrong tap only dims that machine and shows how many tries remain; it never says which rule the machine failed. A 6th wrong tap clears the session and sends the team back to the home page to start over. A correct tap confirms success but still explains nothing, so the two rules stay undocumented in the UI even after a team passes — the only way to learn them is by reading the floor across many practice casinos.
 
 ## Files
 
@@ -49,12 +49,15 @@ All tunables are in the `CONFIG` object at the top of the logic block in `index.
 | `MAJOR_WEIGHT` | 3 | Draw weight of the majority color vs. 1 for each other color |
 | `MIN_MARGIN` | 4 | Minimum lead of the majority color over the runner-up |
 | `MAJOR_SOFT_CAP` | 18 | Maximum count of the majority color |
-| `HOUSE_OUTCOMES` | `[-2..+1]`, EV −0.50 | Payout table `[dollars, weight]` for the 35 house machines |
-| `FAVORABLE_OUTCOMES` | `[-1..+2]`, EV +0.30 | Payout table for the 14 favorable machines (and the true machine's normal spins) |
-| `FAVORABLE_COUNT` | 14 | Number of favorable machines; house = 49 − this |
+| `SCORE_WEIGHT_PIT` / `SCORE_WEIGHT_COLOR` | 1 / 1 | Weights of pit-size closeness and color frequency in the graded score (any positive values keep the true machine the unique maximum) |
+| `WARM_THRESHOLD` | 0.6 | Scores at or below this pay exactly like house machines; above it the warm share rises linearly to 1 at score 1 |
+| `HOUSE_OUTCOMES` | `[-2..+1]`, EV −0.50 | Payout table `[dollars, weight]` for cold machines |
+| `WARM_OUTCOMES` | `[0..+3]`, EV +1.50 | Payout table blended in above the threshold, in proportion to the score |
+| `FAVORABLE_OUTCOMES` | `[-1..+2]`, EV +0.30 | The true machine's non-jackpot spins only |
 | `JACKPOT_CHANCE`, `JACKPOT_MIN`, `JACKPOT_MAX` | 0.5, 15, 25 | Chance and range of the true machine's jackpot |
-| `SPIN_BUDGET` | 15 | Spins per practice casino |
+| `SPIN_BUDGET` | 30 | Spins per practice casino |
 | `AUDIT_CODE` | `BANDIT` | Code shown on every passed audit |
+| `AUDIT_ATTEMPTS` | 5 | Wrong taps allowed in the Final Audit before it restarts |
 
 The UI timing constant `SPIN_COOLDOWN_MS` sits at the top of the UI script. The grid shape (`ROWS`, `COLS`, `MACHINE_COUNT`, `AISLE_COUNT`, currently 12×12 / 50 / 94) is also in `CONFIG`; `AISLE_COUNT` must equal `ROWS × COLS − MACHINE_COUNT`, and the board picks up `COLS` automatically. Run the tests after any change: they check every invariant the game relies on.
 
@@ -68,10 +71,10 @@ The game is a single static file with no network requests, so any static host wo
 
 ## Saved progress
 
-Every new visit (a new tab or window, or reopening the file or site) starts at the home page. Within a tab, the game saves the current session to `sessionStorage` (key `house-rule:v1`) only so an accidental refresh doesn't lose progress. A refresh mid-practice **resumes the same casino with the same remaining spins**, so refreshing never refills the budget. Net winnings reset to $0 with every new casino. A refresh in the Audit resumes the same audit grid (a wrong tap, not a refresh, is what ends the attempt), and a refresh on the success screen keeps the audit code. Saved data is fully validated on load and silently discarded if anything is off. If storage is blocked, the game still works; it just starts fresh at the intro after a reload.
+Every new visit (a new tab or window, or reopening the file or site) starts at the home page. Within a tab, the game saves the current session to `sessionStorage` (key `house-rule:v1`) only so an accidental refresh doesn't lose progress. A refresh mid-practice **resumes the same casino with the same remaining spins**, so refreshing never refills the budget. Net winnings reset to $0 with every new casino. A refresh in the Audit resumes the same audit grid with the same wrong taps and attempts remaining (a refresh never grants extra attempts), and a refresh on the success screen keeps the audit code. Saved data is fully validated on load and silently discarded if anything is off. If storage is blocked, the game still works; it just starts fresh at the intro after a reload.
 
 ## Facilitator debug view
 
-Add `?debug=1` to the URL (for example `index.html?debug=1`) to show a panel under the grid. It lists the true machine's position, its pit id and size, all pit sizes, the majority and runner-up colors with counts, the tier EVs, and the summed expected value across all 50 machines. The true machine also gets a dashed outline. Use it to sanity-check generations before the workshop.
+Add `?debug=1` to the URL (for example `index.html?debug=1`) to show a panel under the grid. It lists the true machine's position, its pit id and size, all pit sizes, the majority and runner-up colors with counts, the true machine's score and EV, the best-scoring other machine, how many machines are warm and how many favor the customer, the house/warm/true EV endpoints, and the summed expected value across all 50 machines. The true machine also gets a dashed outline. Use it to sanity-check generations before the workshop.
 
 **Never link to `?debug=1` from anything players see.** Nothing in the game UI links to it, so keep it that way in any page that hosts the game.

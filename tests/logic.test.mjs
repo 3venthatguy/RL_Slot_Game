@@ -77,23 +77,58 @@ test("true machine's pit-of-origin is roughly uniform among the size-4 pits", ()
   }
 });
 
-test('payout tiers are 35/14/1 and independent of pit size and color', () => {
-  let s4Fav = 0, s4All = 0, majFav = 0, majAll = 0, restFav = 0, restAll = 0;
+test('the true machine is the unique maximum score (exactly 1) on every floor', () => {
   for (const g of grids) {
-    const t = [0, 0, 0];
-    machinesOf(g).forEach((i) => t[g.tiers[i]]++);
-    assert.deepEqual(t, [35, 14, 1]);
-    for (const i of machinesOf(g)) {
-      if (i === g.trueCell) continue;
-      const fav = g.tiers[i] === L.TIER.FAVORABLE ? 1 : 0;
-      if (inS4(g, i)) { s4All++; s4Fav += fav; } else { restAll++; restFav += fav; }
-      if (g.colors[i] === g.majorColor) { majAll++; majFav += fav; }
+    const s = L.floorScores(g);
+    assert.equal(s[g.trueCell], 1);
+    for (const i of machinesOf(g)) if (i !== g.trueCell) assert.ok(s[i] < 1, `cell ${i} score ${s[i]}`);
+    g.cells.forEach((p, i) => { if (p < 0) assert.equal(s[i], -1); });
+  }
+});
+
+test('score is graded: falls with pit-size distance from 4, rises with color frequency', () => {
+  const sizes = [4, 3, 5, 6, 7];
+  const ps = sizes.map((s) => L.pitScore(s));
+  assert.equal(ps[0], 1);
+  assert.equal(ps[1], ps[2]);
+  assert.ok(ps[0] > ps[1] && ps[2] > ps[3] && ps[3] > ps[4] && ps[4] >= 0);
+  for (const g of grids.slice(0, 500)) {
+    const s = L.floorScores(g);
+    const counts = L.countColors(g.colors);
+    const ms = machinesOf(g);
+    for (const i of ms) {
+      for (const j of ms) {
+        const di = Math.abs(g.pitSizes[g.cells[i]] - 4), dj = Math.abs(g.pitSizes[g.cells[j]] - 4);
+        const ci = counts[g.colors[i]], cj = counts[g.colors[j]];
+        if (ci === cj && di < dj) assert.ok(s[i] > s[j]);
+        if (di === dj && ci > cj) assert.ok(s[i] > s[j]);
+      }
     }
   }
-  const base = 14 / 49;
-  for (const [name, f, a] of [['size-4 pits', s4Fav, s4All], ['majority color', majFav, majAll], ['other', restFav, restAll]]) {
-    assert.ok(Math.abs(f / a - base) < 0.015, `${name}: favorable rate ${(f / a).toFixed(3)} vs ${base.toFixed(3)}`);
+});
+
+test('machine EV is monotone in score, house-level at or below the threshold, capped at warm EV', () => {
+  for (let k = 0; k <= 100; k++) {
+    const x = k / 100;
+    if (x <= C.WARM_THRESHOLD) assert.equal(L.evForScore(x), L.HOUSE_EV);
+    assert.ok(L.evForScore(x) <= L.WARM_EV + 1e-12);
+    if (k > 0) assert.ok(L.evForScore(x) >= L.evForScore((k - 1) / 100));
   }
+  for (const g of grids.slice(0, 500)) {
+    const s = L.floorScores(g);
+    const ev = L.floorEVs(g);
+    const ms = machinesOf(g).filter((i) => i !== g.trueCell);
+    for (const i of ms) for (const j of ms) if (s[i] > s[j]) assert.ok(ev[i] >= ev[j]);
+    assert.equal(ev[g.trueCell], L.TRUE_EV);
+    for (const i of ms) assert.ok(ev[i] < L.TRUE_EV);
+  }
+});
+
+test('most machines still favor the house: median customer-favorable count per floor is 10-20', () => {
+  const fav = grids.map((g) => L.floorEVs(g).filter((ev, i) => ev !== null && i !== g.trueCell && ev > 0).length);
+  fav.sort((a, b) => a - b);
+  const median = fav[fav.length >> 1];
+  assert.ok(median >= 10 && median <= 20, `median ${median}`);
 });
 
 test('pits are contiguous (placement retries succeed in practice)', () => {
@@ -162,30 +197,47 @@ test('uniqueness guard: a corrupted generation is logged and regenerated, never 
   assert.equal(errs2.length, 3);
 });
 
-test('spin draws stay in range and tier EVs match the spec', () => {
+test('spin draws stay in range and match each machine EV', () => {
   const r = L.mulberry32(99);
-  const draws = { 0: [], 1: [], 2: [] };
-  for (let k = 0; k < 60000; k++) for (const t of [0, 1, 2]) draws[t].push(L.spin(t, r));
   const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-  assert.ok(draws[0].every((v) => v >= -2 && v <= 1));
-  assert.ok(draws[1].every((v) => v >= -1 && v <= 2));
-  assert.ok(draws[2].every((v) => (v >= -1 && v <= 2) || (v >= 15 && v <= 25)));
-  assert.ok(Math.abs(mean(draws[0]) - -0.5) < 0.03);
-  assert.ok(Math.abs(mean(draws[1]) - 0.3) < 0.03);
-  assert.ok(Math.abs(mean(draws[2]) - L.tierEV(2)) < 0.2);
-  const jackpotRate = draws[2].filter((v) => v >= 15).length / draws[2].length;
+  assert.ok(Math.abs(L.HOUSE_EV - -0.5) < 1e-9);
+  assert.ok(Math.abs(L.WARM_EV - 1.5) < 1e-9);
+  // 0.5 x mean jackpot $20 + 0.5 x favorable $0.30
+  assert.ok(Math.abs(L.TRUE_EV - 10.15) < 1e-9);
+
+  const g = grids.find((x) => {
+    const s = L.floorScores(x);
+    return machinesOf(x).some((i) => s[i] <= C.WARM_THRESHOLD) &&
+      machinesOf(x).some((i) => i !== x.trueCell && L.warmth(s[i]) > 0.5);
+  });
+  assert.ok(g, 'no grid with both a cold and a clearly warm machine');
+  const s = L.floorScores(g);
+  const cold = machinesOf(g).find((i) => s[i] <= C.WARM_THRESHOLD);
+  const warm = machinesOf(g).find((i) => i !== g.trueCell && L.warmth(s[i]) > 0.5);
+  const draw = (i) => Array.from({ length: 60000 }, () => L.spin(g, i, r));
+
+  const dc = draw(cold), dw = draw(warm), dt = draw(g.trueCell);
+  assert.ok(dc.every((v) => v >= -2 && v <= 1));
+  assert.ok(dw.every((v) => v >= -2 && v <= 3));
+  assert.ok(dw.some((v) => v >= 2), 'warm machine never showed a +2/+3 tell');
+  assert.ok(dt.every((v) => (v >= -1 && v <= 2) || (v >= 15 && v <= 25)));
+  assert.ok(Math.abs(mean(dc) - L.machineEV(g, cold)) < 0.03);
+  assert.ok(Math.abs(mean(dw) - L.machineEV(g, warm)) < 0.03);
+  assert.ok(Math.abs(mean(dt) - L.TRUE_EV) < 0.2);
+  const jackpotRate = dt.filter((v) => v >= 15).length / dt.length;
   assert.equal(C.JACKPOT_CHANCE, 0.5);
   assert.ok(Math.abs(jackpotRate - C.JACKPOT_CHANCE) < 0.01, `jackpot rate ${jackpotRate}`);
-  assert.ok(Math.abs(L.tierEV(0) - -0.5) < 1e-9);
-  assert.ok(Math.abs(L.tierEV(1) - 0.3) < 1e-9);
-  // 0.5 x mean jackpot $20 + 0.5 x favorable $0.30
-  assert.ok(Math.abs(L.tierEV(2) - 10.15) < 1e-9);
-  assert.throws(() => L.spin(-1, r));
+
+  const aisle = g.cells.indexOf(-1);
+  assert.throws(() => L.spin(g, aisle, r), RangeError);
+  assert.throws(() => L.spin(g, -1, r), RangeError);
 });
 
-test('aggregateEV is computed from the tiers (35 house + 14 favorable + 1 true)', () => {
-  const expected = 35 * L.tierEV(0) + 14 * L.tierEV(1) + L.tierEV(2);
-  for (const g of grids.slice(0, 50)) assert.ok(Math.abs(L.aggregateEV(g) - expected) < 1e-9);
+test('aggregateEV is the sum of machine EVs', () => {
+  for (const g of grids.slice(0, 50)) {
+    const expected = machinesOf(g).reduce((a, i) => a + L.machineEV(g, i), 0);
+    assert.ok(Math.abs(L.aggregateEV(g) - expected) < 1e-9);
+  }
 });
 
 test('every pit has 3-7 machines', () => {
@@ -197,20 +249,28 @@ test('audit code is always BANDIT', () => {
 });
 
 test('validateSavedState accepts a real session and rejects junk', () => {
-  const good = { v: 1, phase: 'practice', grid: grids[3], spinsLeft: 9, net: -4, auditCode: null };
+  const good = { v: 1, phase: 'practice', grid: grids[3], spinsLeft: 9, net: -4, wrongTaps: [], auditCode: null };
   const clean = L.validateSavedState(JSON.parse(JSON.stringify(good)));
   assert.ok(clean);
   assert.equal(clean.spinsLeft, 9);
+  const someWrong = machinesOf(grids[3]).filter((i) => i !== grids[3].trueCell);
   const bad = [
-    null, 42, 'x', {}, { ...good, v: 2 }, { ...good, phase: 'win' }, { ...good, spinsLeft: 16 },
+    null, 42, 'x', {}, { ...good, v: 2 }, { ...good, phase: 'win' }, { ...good, spinsLeft: C.SPIN_BUDGET + 1 },
     { ...good, spinsLeft: -1 }, { ...good, net: 1.5 },
+    { ...good, wrongTaps: [grids[3].trueCell] }, { ...good, wrongTaps: 'no' },
+    { ...good, wrongTaps: [someWrong[0], someWrong[0]] },
+    { ...good, wrongTaps: someWrong.slice(0, C.AUDIT_ATTEMPTS) }, // at the cap: should already have restarted
     { ...good, auditCode: 'BANDIT' }, { ...good, phase: 'success', auditCode: null },
     { ...good, phase: 'success', auditCode: 'K7QM2P' },
     { ...good, grid: { ...grids[3], cells: grids[3].cells.slice(1) } },
     { ...good, grid: { ...grids[3], majorColor: (grids[3].majorColor + 1) % 6 } },
   ];
   for (const b of bad) assert.equal(L.validateSavedState(b), null, JSON.stringify(b)?.slice(0, 80));
-  assert.ok(L.validateSavedState({ ...good, phase: 'success', auditCode: 'BANDIT' }));
+  assert.ok(L.validateSavedState({ ...good, wrongTaps: someWrong.slice(0, C.AUDIT_ATTEMPTS - 1), phase: 'success', auditCode: 'BANDIT' }));
+});
+
+test('AUDIT_ATTEMPTS is 5', () => {
+  assert.equal(C.AUDIT_ATTEMPTS, 5);
 });
 
 test('seeded generation is reproducible', () => {

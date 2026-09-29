@@ -190,6 +190,11 @@
   .c-4 { fill: var(--c-emerald); }
   .c-5 { fill: var(--c-sapphire); }
 
+  .cell.is-wrong .icon { opacity: 0.35; }
+  .wrong-mark {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--loss); font-size: 1.1rem; font-weight: 700; pointer-events: none;
+  }
   .cell.is-found { box-shadow: 0 0 0 3px var(--found), inset 0 0 0 3px var(--found); z-index: 1; }
   .cell.is-debug-true { outline: 3px dashed var(--debug); outline-offset: -6px; }
 
@@ -259,7 +264,7 @@
       <h1 id="intro-title" tabindex="-1">The House Rule</h1>
       <p>You're auditors. This casino chain swears its floors pay customers back on average, and on paper the math checks out.</p>
       <p>Most machines quietly favor the house. A few lean your way. One is rigged heavily in the customer's favor, and nothing on it says so.</p>
-      <p>Every floor in the chain is laid out by the same two house rules. The layout tells the story. Spinning helps a little, but you only get a handful of spins per casino.</p>
+      <p>Every floor in the chain is laid out by the same two house rules. The layout tells the story. Spinning helps: machines that come closer to fitting the house rules tend to pay better. But you only get a handful of spins per casino.</p>
       <p>Learn to read the floor, then prove it on a floor you've never seen.</p>
       <p class="msg fail" id="intro-fail-msg" hidden>Audit failed. Start again.</p>
       <div class="actions"><button type="button" class="btn" id="btn-enter">Enter the Casino</button></div>
@@ -275,6 +280,9 @@
       <div class="bar" id="stats">
         <div><span class="stat-label">Spins</span><span class="stat-value" id="stat-spins"></span></div>
         <div><span class="stat-label">Net</span><span class="stat-value" id="stat-net"></span></div>
+      </div>
+      <div class="bar" id="audit-stats" hidden>
+        <div><span class="stat-label">Attempts left</span><span class="stat-value" id="stat-attempts"></span></div>
       </div>
       <div class="actions" id="practice-actions">
         <button type="button" class="btn secondary" id="btn-new">New Casino</button>
@@ -302,8 +310,7 @@
     </div>
     <div class="board" id="success-grid" role="group" aria-label="The audited floor"></div>
     <div class="pad">
-      <h3 style="margin-top:1rem">Why this machine</h3>
-      <p id="success-why"></p>
+      <p id="success-why" style="margin-top:1rem"></p>
       <div class="actions"><button type="button" class="btn" id="btn-again">Play Again</button></div>
       <p class="fine">Nothing here was recorded or sent anywhere.</p>
     </div>
@@ -339,19 +346,23 @@ const HouseLogic = (() => {
     MAJOR_SOFT_CAP: 18,             // keep the majority from swamping the floor
     REPAIR_ATTEMPTS: 200,
     MAX_GENERATION_ATTEMPTS: 25,
-    FAVORABLE_COUNT: 14,            // house machines = MACHINE_COUNT - 1 - FAVORABLE_COUNT = 35
+    // Graded score: score = (W_PIT * pitScore + W_COLOR * colorScore) / (W_PIT + W_COLOR), in [0, 1]
+    SCORE_WEIGHT_PIT: 1,
+    SCORE_WEIGHT_COLOR: 1,
+    WARM_THRESHOLD: 0.6,            // scores at or below this pay exactly like house machines
     // Payout tables: [dollars, weight]
     HOUSE_OUTCOMES: Object.freeze([[-2, 1], [-1, 1], [0, 1], [1, 1]].map(Object.freeze)),     // EV -0.50
-    FAVORABLE_OUTCOMES: Object.freeze([[-1, 3], [0, 3], [1, 2], [2, 2]].map(Object.freeze)),  // EV +0.30
+    WARM_OUTCOMES: Object.freeze([[0, 1], [1, 1], [2, 1], [3, 1]].map(Object.freeze)),        // EV +1.50
+    FAVORABLE_OUTCOMES: Object.freeze([[-1, 3], [0, 3], [1, 2], [2, 2]].map(Object.freeze)),  // EV +0.30, true machine's non-jackpot spins
     JACKPOT_CHANCE: 0.5,            // true machine only: half its spins pay a jackpot
     JACKPOT_MIN: 15,
     JACKPOT_MAX: 25,
-    SPIN_BUDGET: 15,                // spins per practice casino
+    SPIN_BUDGET: 30,                // spins per practice casino
     AUDIT_CODE: 'BANDIT',           // shown on every passed audit
+    AUDIT_ATTEMPTS: 5,              // wrong taps allowed in the Final Audit before it restarts
   });
 
   const COLORS = Object.freeze(['Ruby', 'Amber', 'Teal', 'Violet', 'Emerald', 'Sapphire']);
-  const TIER = Object.freeze({ HOUSE: 0, FAVORABLE: 1, TRUE: 2 });
   const TOTAL = CONFIG.ROWS * CONFIG.COLS;
 
   class GenerationError extends Error {
@@ -578,23 +589,12 @@ const HouseLogic = (() => {
     return { colors, majorColor: major, trueCell };
   }
 
-  // ---- Payout tiers: an independent shuffle, blind to pits and colors ----
-  function assignTiers(cells, trueCell, rng) {
-    const tiers = new Array(TOTAL).fill(-1);
-    const others = [];
-    for (let i = 0; i < TOTAL; i++) if (cells[i] >= 0 && i !== trueCell) others.push(i);
-    shuffle(rng, others).forEach((c, k) => { tiers[c] = k < CONFIG.FAVORABLE_COUNT ? TIER.FAVORABLE : TIER.HOUSE; });
-    tiers[trueCell] = TIER.TRUE;
-    return tiers;
-  }
-
   // ---- Validation: used both as the post-generation guard and to vet resumed state ----
   function validateGrid(g) {
     if (!g || typeof g !== 'object') return ['grid is not an object'];
     const isIntArr = (a, len) => Array.isArray(a) && (len === undefined || a.length === len) && a.every(Number.isInteger);
     if (!isIntArr(g.cells, TOTAL)) return ['cells must be ' + TOTAL + ' integers'];
     if (!isIntArr(g.colors, TOTAL)) return ['colors must be ' + TOTAL + ' integers'];
-    if (!isIntArr(g.tiers, TOTAL)) return ['tiers must be ' + TOTAL + ' integers'];
     if (!isIntArr(g.pitSizes) || g.pitSizes.length < 1 || g.pitSizes.length > TOTAL) return ['pitSizes invalid'];
     if (!Number.isInteger(g.majorColor) || g.majorColor < 0 || g.majorColor >= COLORS.length) return ['majorColor invalid'];
     if (!Number.isInteger(g.trueCell) || g.trueCell < 0 || g.trueCell >= TOTAL) return ['trueCell invalid'];
@@ -608,12 +608,11 @@ const HouseLogic = (() => {
       const p = g.cells[i];
       if (p === -1) {
         aisles++;
-        if (g.colors[i] !== -1 || g.tiers[i] !== -1) errs.push(`aisle ${i} has color/tier`);
+        if (g.colors[i] !== -1) errs.push(`aisle ${i} has a color`);
       } else if (p >= 0 && p < K) {
         machines++;
         actual[p]++;
         if (g.colors[i] < 0 || g.colors[i] >= COLORS.length) errs.push(`machine ${i} color invalid`);
-        if (g.tiers[i] < 0 || g.tiers[i] > 2) errs.push(`machine ${i} tier invalid`);
       } else {
         return [`cell ${i} has unknown pit ${p}`];
       }
@@ -626,11 +625,6 @@ const HouseLogic = (() => {
     if (sum !== CONFIG.MACHINE_COUNT) errs.push(`pit sizes sum to ${sum}`);
     const m = g.pitSizes.filter((s) => s === CONFIG.TRUE_PIT_SIZE).length;
     if (m < CONFIG.TRUE_PIT_COUNT_MIN || m > CONFIG.TRUE_PIT_COUNT_MAX) errs.push(`${m} size-${CONFIG.TRUE_PIT_SIZE} pits`);
-
-    const tierCounts = [0, 0, 0];
-    for (let i = 0; i < TOTAL; i++) if (g.tiers[i] >= 0) tierCounts[g.tiers[i]]++;
-    if (tierCounts[TIER.TRUE] !== 1 || g.tiers[g.trueCell] !== TIER.TRUE) errs.push('true tier misplaced');
-    if (tierCounts[TIER.FAVORABLE] !== CONFIG.FAVORABLE_COUNT) errs.push('favorable count wrong');
 
     const info = majorityInfo(countColors(g.colors));
     if (info.margin < CONFIG.MIN_MARGIN) errs.push(`majority margin ${info.margin} < ${CONFIG.MIN_MARGIN}`);
@@ -662,8 +656,7 @@ const HouseLogic = (() => {
         const pitSizes = choosePitSizes(rng);
         const { cells, contiguous } = placePits(pitSizes, rng);
         const { colors, majorColor, trueCell } = assignColors(cells, pitSizes, rng);
-        const tiers = assignTiers(cells, trueCell, rng);
-        grid = { cells, pitSizes, colors, tiers, majorColor, trueCell, contiguous };
+        grid = { cells, pitSizes, colors, majorColor, trueCell, contiguous };
       } catch (e) {
         if (!(e instanceof GenerationError)) throw e;
         log.error(`[House Rule] Generation error (attempt ${attempt}): ${e.message}. Regenerating.`);
@@ -677,32 +670,57 @@ const HouseLogic = (() => {
     throw new GenerationError(`Could not generate a valid grid in ${maxAttempts} attempts`);
   }
 
+  // ---- Graded score: the same two rules, read as distances instead of pass/fail ----
+  const PIT_SPAN = Math.max(...CONFIG.OTHER_PIT_SIZES.map((s) => Math.abs(s - CONFIG.TRUE_PIT_SIZE)));
+  function pitScore(size) {
+    return 1 - Math.abs(size - CONFIG.TRUE_PIT_SIZE) / PIT_SPAN;
+  }
+  // Per-cell score in [0, 1], -1 for aisles. trueCell is the unique 1: validateGrid guarantees it is
+  // the only size-4 majority machine, and the margin keeps every other color's count strictly lower.
+  function floorScores(g) {
+    const counts = countColors(g.colors);
+    const top = counts[g.majorColor];
+    const wp = CONFIG.SCORE_WEIGHT_PIT, wc = CONFIG.SCORE_WEIGHT_COLOR;
+    return g.cells.map((p, i) => (p < 0 ? -1
+      : (wp * pitScore(g.pitSizes[p]) + wc * counts[g.colors[i]] / top) / (wp + wc)));
+  }
+  // Share of spins drawn from the warm table instead of the house table.
+  function warmth(score) {
+    return Math.min(1, Math.max(0, (score - CONFIG.WARM_THRESHOLD) / (1 - CONFIG.WARM_THRESHOLD)));
+  }
+
   // ---- Spins and expected value ----
   const drawOutcome = (table, rng) => table[weightedPick(rng, table.map((o) => o[1]))][0];
-  function spin(tier, rng = Math.random) {
-    if (tier === TIER.HOUSE) return drawOutcome(CONFIG.HOUSE_OUTCOMES, rng);
-    if (tier === TIER.FAVORABLE) return drawOutcome(CONFIG.FAVORABLE_OUTCOMES, rng);
-    if (tier === TIER.TRUE) {
+  function spin(g, i, rng = Math.random) {
+    if (!(i >= 0 && i < TOTAL && g.cells[i] >= 0)) throw new RangeError('Not a machine: ' + i);
+    if (i === g.trueCell) {
       return rng() < CONFIG.JACKPOT_CHANCE
         ? randInt(rng, CONFIG.JACKPOT_MIN, CONFIG.JACKPOT_MAX)
         : drawOutcome(CONFIG.FAVORABLE_OUTCOMES, rng);
     }
-    throw new RangeError('Not a machine tier: ' + tier);
+    const w = warmth(floorScores(g)[i]);
+    return drawOutcome(rng() < w ? CONFIG.WARM_OUTCOMES : CONFIG.HOUSE_OUTCOMES, rng);
   }
   function tableEV(table) {
     const w = table.reduce((a, o) => a + o[1], 0);
     return table.reduce((a, o) => a + o[0] * o[1], 0) / w;
   }
-  function tierEV(tier) {
-    if (tier === TIER.HOUSE) return tableEV(CONFIG.HOUSE_OUTCOMES);
-    if (tier === TIER.FAVORABLE) return tableEV(CONFIG.FAVORABLE_OUTCOMES);
-    const jackpotMean = (CONFIG.JACKPOT_MIN + CONFIG.JACKPOT_MAX) / 2;
-    return CONFIG.JACKPOT_CHANCE * jackpotMean + (1 - CONFIG.JACKPOT_CHANCE) * tableEV(CONFIG.FAVORABLE_OUTCOMES);
+  const HOUSE_EV = tableEV(CONFIG.HOUSE_OUTCOMES);
+  const WARM_EV = tableEV(CONFIG.WARM_OUTCOMES);
+  const TRUE_EV = CONFIG.JACKPOT_CHANCE * (CONFIG.JACKPOT_MIN + CONFIG.JACKPOT_MAX) / 2 +
+    (1 - CONFIG.JACKPOT_CHANCE) * tableEV(CONFIG.FAVORABLE_OUTCOMES);
+  function evForScore(score) {
+    return HOUSE_EV + warmth(score) * (WARM_EV - HOUSE_EV);
+  }
+  // Per-cell EV, null for aisles.
+  function floorEVs(g) {
+    return floorScores(g).map((s, i) => (s < 0 ? null : i === g.trueCell ? TRUE_EV : evForScore(s)));
+  }
+  function machineEV(g, i) {
+    return floorEVs(g)[i];
   }
   function aggregateEV(g) {
-    let sum = 0;
-    for (const t of g.tiers) if (t >= 0) sum += tierEV(t);
-    return sum;
+    return floorEVs(g).reduce((a, ev) => (ev === null ? a : a + ev), 0);
   }
 
   // ---- Rendering helpers (pure) ----
@@ -773,21 +791,28 @@ const HouseLogic = (() => {
     const g = o.grid;
     if (!Number.isInteger(o.spinsLeft) || o.spinsLeft < 0 || o.spinsLeft > CONFIG.SPIN_BUDGET) return null;
     if (!Number.isInteger(o.net) || Math.abs(o.net) > 1e6) return null;
+    if (!Array.isArray(o.wrongTaps) || o.wrongTaps.length >= CONFIG.AUDIT_ATTEMPTS) return null;
+    for (const t of o.wrongTaps) {
+      if (!Number.isInteger(t) || t < 0 || t >= TOTAL || g.cells[t] < 0 || t === g.trueCell) return null;
+    }
+    if (new Set(o.wrongTaps).size !== o.wrongTaps.length) return null;
     if (o.auditCode !== (o.phase === 'success' ? CONFIG.AUDIT_CODE : null)) return null;
     return {
-      v: 1, phase: o.phase, spinsLeft: o.spinsLeft, net: o.net, auditCode: o.auditCode,
+      v: 1, phase: o.phase, spinsLeft: o.spinsLeft, net: o.net,
+      wrongTaps: o.wrongTaps.slice(), auditCode: o.auditCode,
       grid: {
         cells: g.cells.slice(), pitSizes: g.pitSizes.slice(), colors: g.colors.slice(),
-        tiers: g.tiers.slice(), majorColor: g.majorColor, trueCell: g.trueCell, contiguous: g.contiguous === true,
+        majorColor: g.majorColor, trueCell: g.trueCell, contiguous: g.contiguous === true,
       },
     };
   }
 
   return {
-    CONFIG, COLORS, TIER, TOTAL, GenerationError,
-    mulberry32, neighbors, choosePitSizes, placePits, assignColors, assignTiers,
+    CONFIG, COLORS, TOTAL, GenerationError, HOUSE_EV, WARM_EV, TRUE_EV,
+    mulberry32, neighbors, choosePitSizes, placePits, assignColors,
     countColors, majorityInfo, candidates, validateGrid, generateGrid,
-    spin, tierEV, aggregateEV, borderSides, pitTints, pitLetters, isPitContiguous,
+    pitScore, floorScores, warmth, evForScore, floorEVs, machineEV,
+    spin, aggregateEV, borderSides, pitTints, pitLetters, isPitContiguous,
     validateSavedState,
   };
 })();
@@ -947,6 +972,19 @@ const HouseLogic = (() => {
     return $('floor-grid').querySelector(`[data-cell="${i}"]`);
   }
 
+  // Dims a wrong Audit guess and marks it ruled out, without saying why it was wrong.
+  function markWrong(i) {
+    const node = cellNode(i);
+    if (!node || node.classList.contains('is-wrong')) return;
+    node.classList.add('is-wrong');
+    node.setAttribute('aria-label', node.dataset.label + ', already tried');
+    const x = document.createElement('span');
+    x.className = 'wrong-mark';
+    x.setAttribute('aria-hidden', 'true');
+    x.textContent = '✕';
+    node.append(x);
+  }
+
   function showPop(i, amount) {
     const node = cellNode(i);
     if (!node) return;
@@ -956,6 +994,10 @@ const HouseLogic = (() => {
     pop.textContent = money(amount);
     node.append(pop);
     setTimeout(() => pop.remove(), POP_MS);
+  }
+
+  function updateAuditBar() {
+    $('stat-attempts').textContent = `${C.AUDIT_ATTEMPTS - state.wrongTaps.length} / ${C.AUDIT_ATTEMPTS}`;
   }
 
   // ---- Screens ----
@@ -988,6 +1030,17 @@ const HouseLogic = (() => {
     const pit = g.cells[g.trueCell];
     const { r, c } = rc(g.trueCell);
     const ev = L.aggregateEV(g);
+    const scores = L.floorScores(g);
+    const evs = L.floorEVs(g);
+    let best = -1, warm = 0, favorable = 0;
+    for (let i = 0; i < L.TOTAL; i++) {
+      if (scores[i] < 0 || i === g.trueCell) continue;
+      if (best < 0 || scores[i] > scores[best]) best = i;
+      if (L.warmth(scores[i]) > 0) warm++;
+      if (evs[i] > 0) favorable++;
+    }
+    const b = rc(best);
+    const signed = (x) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2);
     const rows = [
       ['True machine', `row ${r}, col ${c} (cell ${g.trueCell})`],
       ['Pit', `id ${pit} (letter ${L.pitLetters(g)[pit]}), size ${g.pitSizes[pit]}`],
@@ -996,7 +1049,10 @@ const HouseLogic = (() => {
       ['All contiguous', g.contiguous ? 'yes' : 'no (fallback used)'],
       ['Majority color', `${L.COLORS[info.color]} ×${info.count}`],
       ['Runner-up', `${L.COLORS[info.runnerUp]} ×${info.runnerUpCount} (margin ${info.margin})`],
-      ['Tier EVs', `house ${L.tierEV(0).toFixed(2)}, favorable ${L.tierEV(1).toFixed(2)}, true ${L.tierEV(2).toFixed(2)}`],
+      ['True machine score', `${scores[g.trueCell].toFixed(3)} (EV ${signed(evs[g.trueCell])})`],
+      ['Best other machine', `row ${b.r}, col ${b.c}: score ${scores[best].toFixed(3)} (EV ${signed(evs[best])})`],
+      ['Warm / favorable', `${warm} machines above the ${C.WARM_THRESHOLD} threshold, ${favorable} with EV > 0`],
+      ['EV endpoints', `house ${signed(L.HOUSE_EV)}, warm ${signed(L.WARM_EV)}, true ${signed(L.TRUE_EV)}`],
       ['Sum of EV, all 50', `${ev >= 0 ? '+' : '−'}$${Math.abs(ev).toFixed(2)} per spin of each machine (${ev >= 0 ? 'net-positive' : 'NOT net-positive'} for customers)`],
     ];
     const h = document.createElement('h3');
@@ -1019,6 +1075,7 @@ const HouseLogic = (() => {
       ? 'No more spins. Tap the one machine you believe is rigged in the customer’s favor.'
       : 'Look at the floor as long as you like; looking is free. Tap a machine to spin it.';
     $('stats').hidden = audit;
+    $('audit-stats').hidden = !audit;
     $('practice-actions').hidden = audit;
     $('audit-actions').hidden = !audit;
     const msg = $('floor-msg');
@@ -1026,7 +1083,12 @@ const HouseLogic = (() => {
     msg.textContent = '';
     renderGrid($('floor-grid'), state.grid, state.phase);
     renderLegend(state.grid);
-    if (!audit) updateBar();
+    if (audit) {
+      state.wrongTaps.forEach(markWrong);
+      updateAuditBar();
+    } else {
+      updateBar();
+    }
     renderDebug();
     showScreen('screen-floor', focusHeading);
   }
@@ -1040,13 +1102,8 @@ const HouseLogic = (() => {
       found.classList.add('is-found');
       found.setAttribute('aria-label', found.getAttribute('aria-label') + ', the machine you found');
     }
-    const info = L.majorityInfo(L.countColors(g.colors));
-    const { r, c } = rc(g.trueCell);
-    $('success-why').textContent =
-      `Row ${r}, column ${c}. It sits in a pit of exactly ${g.pitSizes[g.cells[g.trueCell]]} machines, ` +
-      `and it's ${L.COLORS[g.colors[g.trueCell]]}, the most common color on this floor ` +
-      `(${info.count} of ${C.MACHINE_COUNT} machines; next is ${L.COLORS[info.runnerUp]} with ${info.runnerUpCount}). ` +
-      `It's the only machine that satisfies both rules.`;
+    // Deliberately no explanation: the two rules stay hidden even after a correct answer.
+    $('success-why').textContent = 'That was the machine. No further detail is given, so the two rules stay yours to figure out.';
     showScreen('screen-success', focusHeading);
   }
 
@@ -1060,21 +1117,21 @@ const HouseLogic = (() => {
   function enterPractice() {
     state = {
       v: 1, phase: 'practice', grid: freshGrid(), spinsLeft: C.SPIN_BUDGET,
-      net: 0, auditCode: null,
+      net: 0, wrongTaps: [], auditCode: null,
     };
     save();
     return state;
   }
 
   function startAudit() {
-    state = { ...state, phase: 'audit', grid: freshGrid(), spinsLeft: 0, auditCode: null };
+    state = { ...state, phase: 'audit', grid: freshGrid(), spinsLeft: 0, wrongTaps: [], auditCode: null };
     save();
     render(true);
-    announce('Final Audit. No more spins. Choose the one machine you believe is rigged in the customer’s favor.');
+    announce(`Final Audit. No more spins. Choose the one machine you believe is rigged in the customer’s favor. You have ${C.AUDIT_ATTEMPTS} attempts.`);
   }
 
-  // A wrong tap in the Final Audit ends the attempt: clear the session and send
-  // them back to the home page to start over, so they can't brute-force the grid.
+  // AUDIT_ATTEMPTS wrong taps in the Final Audit end the attempt: clear the session and
+  // send them back to the home page to start over, so they can't brute-force the grid.
   function failAudit() {
     try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) { /* storage unavailable: state is cleared below regardless */ }
     state = null;
@@ -1090,7 +1147,7 @@ const HouseLogic = (() => {
       const now = Date.now();
       if (state.spinsLeft <= 0 || now < cooldownUntil) return;
       cooldownUntil = now + SPIN_COOLDOWN_MS;
-      const amount = L.spin(g.tiers[i]);
+      const amount = L.spin(g, i);
       state.spinsLeft -= 1;
       state.net += amount;
       save();
@@ -1107,9 +1164,18 @@ const HouseLogic = (() => {
         render(true);
         announce(`Audit passed. Your audit code is ${state.auditCode.split('').join(' ')}.`);
       } else {
-        // Deliberately no feedback about why: a wrong answer gives no clue about the rules,
-        // and ends the attempt rather than letting them keep guessing on this grid.
-        failAudit();
+        // Deliberately no feedback about why: a wrong answer gives no clue about the rules.
+        const wrongTaps = state.wrongTaps.includes(i) ? state.wrongTaps : [...state.wrongTaps, i];
+        const attemptsLeft = C.AUDIT_ATTEMPTS - wrongTaps.length;
+        if (attemptsLeft <= 0) {
+          failAudit();
+          return;
+        }
+        state = { ...state, wrongTaps };
+        save();
+        markWrong(i);
+        updateAuditBar();
+        announce(`Not the machine. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`);
       }
     }
   }
